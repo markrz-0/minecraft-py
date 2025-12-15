@@ -111,6 +111,12 @@ class Section:
         # Clamp to max 4
         bx2, by2, bz2 = min(4, bx2), min(4, by2), min(4, bz2)
         self.biomes[by1:by2, bz1:bz2, bx1:bx2] = b_id
+    
+    def get_block(self, x, y, z):
+        # Retrieve the ID from the [Y, Z, X] numpy array
+        block_id = self.blocks[y, z, x]
+        # Return the string name from the palette
+        return self.block_palette[block_id]
 
     # --- EXPORT ---
     def to_nbt(self):
@@ -172,6 +178,16 @@ class Chunk:
             local_y1 = max(0, y1 - sec_base_y)
             local_y2 = min(16, y2 - sec_base_y)
             section.fill_biomes(rel_x1, local_y1, rel_z1, rel_x2, local_y2, rel_z2, biome_name)
+
+    def get_block(self, rel_x, y, rel_z):
+        section_index = y // 16
+        
+        # If the section hasn't been created yet, it's air
+        if section_index not in self.sections:
+            return "minecraft:air"
+            
+        # Pass the local Y (0-15) to the section
+        return self.sections[section_index].get_block(rel_x, y % 16, rel_z)
 
     def to_nbt(self):
         sections_nbt = List[Compound]()
@@ -285,6 +301,31 @@ class MinecraftWorldSimple:
                     min(16, ex - cbx), ey, min(16, ez - cbz),
                     block_name
                 )
+
+    def get_block(self, pos):
+        """
+        Returns the block name at the given (x, y, z) coordinates.
+        Returns 'minecraft:air' if the area has not been generated.
+        """
+        x, y, z = pos
+        cx, cz = x // 16, z // 16
+        rx, rz = cx // 32, cz // 32
+        
+        # 1. Check if Region exists
+        if (rx, rz) not in self.regions:
+            return "minecraft:air"
+        
+        region = self.regions[(rx, rz)]
+        
+        # 2. Check if Chunk exists within Region
+        # Note: We access .chunks directly to avoid creating a new one via get_chunk()
+        if (cx, cz) not in region.chunks:
+            return "minecraft:air"
+            
+        chunk = region.chunks[(cx, cz)]
+        
+        # 3. Get block from Chunk
+        return chunk.get_block(x % 16, y, z % 16)
 
     def fill_biomes(self, start, end, biome_name):
         x1, y1, z1 = start
