@@ -27,6 +27,25 @@ STANDARD_BIOMES = [
     'minecraft:cherry_grove'
 ]
 
+# --- Flower Configuration ---
+BIOME_FLOWERS = {
+    'swamp': ['minecraft:blue_orchid'],
+    'plains': [
+        'minecraft:dandelion', 'minecraft:poppy', 'minecraft:azure_bluet', 
+        'minecraft:oxeye_daisy', 'minecraft:cornflower', 
+        'minecraft:orange_tulip', 'minecraft:red_tulip', 'minecraft:pink_tulip', 'minecraft:white_tulip'
+    ],
+    'forest': ['minecraft:dandelion', 'minecraft:poppy', 'minecraft:lilac', 'minecraft:rose_bush'],
+    'jungle': ['minecraft:poppy', 'minecraft:dandelion'],
+    'birch': ['minecraft:dandelion', 'minecraft:poppy', 'minecraft:lilac'],
+    'dark_forest': ['minecraft:rose_bush', 'minecraft:peony', 'minecraft:lily_of_the_valley'],
+    'cherry': ['minecraft:pink_petals'],
+    'taiga': ['minecraft:fern', 'minecraft:sweet_berry_bush'], 
+    'snowy': ['minecraft:dandelion', 'minecraft:poppy']
+}
+
+DEFAULT_FLOWERS = ['minecraft:dandelion', 'minecraft:poppy']
+
 # --- Noise Settings ---
 SEED = 12345
 SCALE_TOP = 0.04
@@ -53,17 +72,32 @@ def get_cave_density(x, y, z, seed, scale):
     return snoise3((x + seed) * scale, (y + seed) * scale, (z + seed) * scale, 
                    octaves=2, persistence=0.5, lacunarity=2.0)
 
+# --- Helper: Terrain Calculation ---
+def calculate_surface_y(x, z, island):
+    dist = math.sqrt((x - island.x)**2 + (z - island.z)**2)
+    noise_val = get_height_map(x, z, SEED, SCALE_TOP)
+    y = ISLAND_Y_LEVEL + int(noise_val * 10)
+
+    if dist > island.radius: return -999
+    
+    edge_factor = 1.0 - (dist / island.radius)
+    if edge_factor < 0.2:
+        y -= int((0.2 - edge_factor) * 15)
+
+    if island.has_lake and dist > (island.radius * 0.85):
+        min_safe_height = island.water_level + 1
+        if y < min_safe_height:
+            y = min_safe_height
+            
+    return y
+
 # --- Vegetation Logic ---
 
 def place_tree(mc_world, x, y, z, biome_name):
-    """
-    Procedurally generates a tree based on the biome.
-    Returns True if a tree was placed.
-    """
-    # 1. Determine Tree Materials based on Biome
+    """Procedurally generates a tree."""
     log_type = 'minecraft:oak_log'
     leaf_type = 'minecraft:oak_leaves'
-    tree_shape = 'standard' # standard or pine
+    tree_shape = 'standard' 
 
     if 'spruce' in biome_name or 'taiga' in biome_name or 'snowy' in biome_name:
         log_type = 'minecraft:spruce_log'
@@ -85,42 +119,30 @@ def place_tree(mc_world, x, y, z, biome_name):
         log_type = 'minecraft:cherry_log'
         leaf_type = 'minecraft:cherry_leaves'
     
-    height = random.randint(4, 6)
-
     if tree_shape == 'standard':
-        # Simple Trunk
+        height = random.randint(4, 6)
         mc_world.fill_blocks((x, y, z), (x, y + height - 1, z), log_type)
-        # Leaf Canopy (Spherical-ish)
         leaf_start = y + height - 2
         for ly in range(leaf_start, leaf_start + 4):
             radius = 2 if ly < leaf_start + 2 else 1
             for lx in range(x - radius, x + radius + 1):
                 for lz in range(z - radius, z + radius + 1):
-                    # Don't overwrite the trunk
-                    if lx == x and lz == z and ly < y + height:
-                        continue
-                    # Round corners
-                    if abs(lx-x) == radius and abs(lz-z) == radius:
-                        if random.random() > 0.2: continue
+                    if lx == x and lz == z and ly < y + height: continue
+                    if abs(lx-x) == radius and abs(lz-z) == radius and random.random() > 0.2: continue
                     mc_world.set_block((lx, ly, lz), leaf_type)
                     
     elif tree_shape == 'pine':
-        # Tall Trunk
         height = random.randint(6, 9)
         mc_world.fill_blocks((x, y, z), (x, y + height - 1, z), log_type)
-        # Cone Leaves
         leaf_start = y + 2
         current_radius = 2
         for ly in range(leaf_start, y + height + 2):
             for lx in range(x - current_radius, x + current_radius + 1):
                 for lz in range(z - current_radius, z + current_radius + 1):
                     if lx == x and lz == z and ly < y + height: continue
-                    # Cone shape logic
                     d = math.sqrt((lx-x)**2 + (lz-z)**2)
                     if d <= current_radius + 0.5:
                         mc_world.set_block((lx, ly, lz), leaf_type)
-            
-            # Shrink radius every 2 blocks
             if (ly - leaf_start) % 2 == 1:
                 current_radius -= 1
                 if current_radius < 0: current_radius = 0
@@ -132,6 +154,14 @@ def place_cactus(mc_world, x, y, z):
 def place_sugarcane(mc_world, x, y, z):
     height = random.randint(2, 3)
     mc_world.fill_blocks((x, y + 1, z), (x, y + height, z), 'minecraft:sugar_cane')
+
+def get_random_flower(biome_name):
+    possible_flowers = DEFAULT_FLOWERS
+    for key, flowers in BIOME_FLOWERS.items():
+        if key in biome_name:
+            possible_flowers = flowers
+            break
+    return random.choice(possible_flowers)
 
 # --- Main Generation Logic ---
 
@@ -212,13 +242,8 @@ def generate_islands(mc_world, island_layout_list):
                 dist = math.sqrt((x - island.x)**2 + (z - island.z)**2)
                 if dist > island.radius: continue
 
-                # Height Calculation
-                noise_val = get_height_map(x, z, SEED, SCALE_TOP)
-                top_y = ISLAND_Y_LEVEL + int(noise_val * 10)
-                if (1.0 - dist/island.radius) < 0.2:
-                    top_y -= int((0.2 - (1.0 - dist/island.radius)) * 15)
-                if island.has_lake and dist > (island.radius * 0.85):
-                    if top_y < island.water_level + 1: top_y = island.water_level + 1
+                # Height Calc
+                top_y = calculate_surface_y(x, z, island)
 
                 norm_dist = dist / island.radius
                 current_depth = math.sqrt(max(0, 1.0 - norm_dist**2)) * 35
@@ -243,7 +268,7 @@ def generate_islands(mc_world, island_layout_list):
                     elif depth < 15: block_type = 'minecraft:stone'
                     else: block_type = 'minecraft:deepslate'
 
-                    # Biome Swaps
+                    # Swaps
                     if island.biome == 'minecraft:desert':
                         if block_type == 'minecraft:grass_block': block_type = 'minecraft:sand'
                         elif block_type == 'minecraft:dirt': block_type = 'minecraft:sandstone'
@@ -260,31 +285,33 @@ def generate_islands(mc_world, island_layout_list):
                     mc_world.fill_blocks((x, top_y + 1, z), (x, island.water_level, z), island.liquid_block)
                 
                 elif top_y >= island.water_level:
-                    # Retrieve the block we just placed at the surface
                     surface_block = mc_world.get_block((x, top_y, z))
                     
                     # --- VEGETATION LOGIC ---
-                    
-                    # A. Skip Vegetation for Volcanic
                     if 'volcanic_biome' in island.biome:
                         pass
                     
-                    # B. Sugarcane Check
-                    # Conditions: Next to water level, on valid soil, Island has water (not lava)
+                    # B. Sugarcane
                     elif island.liquid_block == 'minecraft:water' and \
                          top_y == island.water_level and \
                          surface_block in ['minecraft:grass_block', 'minecraft:sand', 'minecraft:dirt']:
                          
-                         if random.random() < 0.35: # 35% chance at shoreline
+                         is_next_to_water = False
+                         for dx, dz in [(1,0), (-1,0), (0,1), (0,-1)]:
+                             neighbor_h = calculate_surface_y(x + dx, z + dz, island)
+                             if neighbor_h < island.water_level:
+                                 is_next_to_water = True
+                                 break
+                        
+                         if is_next_to_water and random.random() < 0.05:
                              place_sugarcane(mc_world, x, top_y, z)
 
-                    # C. Trees and Cactus
+                    # C. Trees, Cacti, Flowers, Dead Bushes
                     else:
-                        # Determine Density
-                        tree_chance = 0.005 # Default (Plains)
+                        tree_chance = 0.005 
                         if 'forest' in island.biome: tree_chance = 0.02
                         elif 'jungle' in island.biome: tree_chance = 0.05
-                        elif 'desert' in island.biome: tree_chance = 0.01 # Cactus chance
+                        elif 'desert' in island.biome: tree_chance = 0.01 
                         
                         if random.random() < tree_chance:
                             if island.biome == 'minecraft:desert':
@@ -294,11 +321,34 @@ def generate_islands(mc_world, island_layout_list):
                                 if surface_block == 'minecraft:grass_block':
                                     place_tree(mc_world, x, top_y + 1, z, island.biome)
                         
-                        # D. Small Grass/Bushes
-                        elif surface_block == 'minecraft:grass_block' and random.random() < 0.2:
-                            mc_world.set_block((x, top_y + 1, z), 'minecraft:grass')
-                        elif island.biome == 'minecraft:desert' and surface_block == 'minecraft:sand' and random.random() < 0.05:
-                            mc_world.set_block((x, top_y + 1, z), 'minecraft:dead_bush')
+                        # D. Ground Cover
+                        else:
+                            # 1. DESERT -> Dead Bush
+                            if island.biome == 'minecraft:desert' and surface_block == 'minecraft:sand':
+                                if random.random() < 0.015:  # Reduced to 1.5%
+                                    mc_world.set_block((x, top_y + 1, z), 'minecraft:dead_bush')
+                            
+                            # 2. GRASSY BIOMES -> Grass or Flower
+                            elif surface_block == 'minecraft:grass_block':
+                                
+                                # Chance for ANY ground cover (grass or flower) reduced to 5%
+                                if random.random() < 0.05: 
+                                    
+                                    # Inside that 5%, only 10% chance for a flower
+                                    if random.random() < 0.10:
+                                        flower_type = get_random_flower(island.biome)
+                                        
+                                        if flower_type in ['minecraft:rose_bush', 'minecraft:lilac', 'minecraft:peony']:
+                                            mc_world.set_block((x, top_y + 1, z), flower_type + '[half=lower]')
+                                            mc_world.set_block((x, top_y + 2, z), flower_type + '[half=upper]')
+                                        else:
+                                            mc_world.set_block((x, top_y + 1, z), flower_type)
+                                    else:
+                                        # 90% chance it's just grass/fern
+                                        vegetation_type = 'minecraft:grass'
+                                        if 'taiga' in island.biome:
+                                            vegetation_type = 'minecraft:fern'
+                                        mc_world.set_block((x, top_y + 1, z), vegetation_type)
 
                 if x == 0 and z == 0:
                     spawn_y = max(top_y, island.water_level) + 2
@@ -306,7 +356,7 @@ def generate_islands(mc_world, island_layout_list):
     return spawn_y
 
 def main():
-    mc_world = MinecraftWorld(world_name="Flora Floating Islands")
+    mc_world = MinecraftWorld(world_name="Detailed Flora Floating Islands")
     
     volcanic_biome = create_volcanic_biome()
     mc_world.add_biome(volcanic_biome)
@@ -320,7 +370,7 @@ def main():
 
     mc_world.set_spawn((0, spawn_y, 0))
     print("Exporting world...")
-    mc_world.export('flora_floating_islands')
+    mc_world.export('detailed_flora_floating_islands')
     print("Done!")
 
 if __name__ == "__main__":
