@@ -5,11 +5,11 @@ from noise import pnoise2, snoise3
 from minecraft import MinecraftWorld, CustomBiome, IntColor
 
 # --- Configuration ---
-NUM_ISLANDS = 64
+NUM_ISLANDS = 30
 ISLAND_RADIUS_MIN = 16
-ISLAND_RADIUS_MAX = 128
+ISLAND_RADIUS_MAX = 256
 ISLAND_Y_LEVEL = 60
-ISLAND_SPREAD = 800
+ISLAND_SPREAD = 500
 
 # Standard biomes
 STANDARD_BIOMES = [
@@ -38,7 +38,8 @@ BIOME_FLOWERS = {
     'forest': ['minecraft:dandelion', 'minecraft:poppy', 'minecraft:lilac', 'minecraft:rose_bush'],
     'jungle': ['minecraft:poppy', 'minecraft:dandelion'],
     'birch': ['minecraft:dandelion', 'minecraft:poppy', 'minecraft:lilac'],
-    'dark_forest': ['minecraft:rose_bush', 'minecraft:peony', 'minecraft:lily_of_the_valley'],
+    # Added Small Mushrooms here
+    'dark_forest': ['minecraft:rose_bush', 'minecraft:peony', 'minecraft:lily_of_the_valley', 'minecraft:brown_mushroom', 'minecraft:red_mushroom'],
     'cherry': ['minecraft:pink_petals'],
     'taiga': ['minecraft:fern', 'minecraft:sweet_berry_bush'], 
     'snowy': ['minecraft:dandelion', 'minecraft:poppy']
@@ -146,6 +147,45 @@ def place_tree(mc_world, x, y, z, biome_name):
             if (ly - leaf_start) % 2 == 1:
                 current_radius -= 1
                 if current_radius < 0: current_radius = 0
+
+def place_big_mushroom(mc_world, x, y, z, mushroom_type='red'):
+    """
+    Generates a large mushroom.
+    mushroom_type: 'red' (dome) or 'brown' (flat)
+    """
+    height = random.randint(5, 7)
+    
+    # 1. Stem
+    mc_world.fill_blocks((x, y, z), (x, y + height - 1, z), 'minecraft:mushroom_stem')
+    
+    cap_center_y = y + height
+    
+    if mushroom_type == 'red':
+        # Dome Shape
+        block = 'minecraft:red_mushroom_block'
+        radius = random.randint(3, 4)
+        
+        for dy in range(radius + 1):
+            # As we go up, radius gets smaller to form dome
+            slice_radius = int(math.sqrt(radius**2 - dy**2))
+            level_y = cap_center_y + dy - 1 # Shift down slightly so it sits on stem
+            
+            for lx in range(x - slice_radius, x + slice_radius + 1):
+                for lz in range(z - slice_radius, z + slice_radius + 1):
+                    # Round edges
+                    if math.sqrt((lx-x)**2 + (lz-z)**2) <= slice_radius + 0.5:
+                         mc_world.set_block((lx, level_y, lz), block)
+                         
+    elif mushroom_type == 'brown':
+        # Flat Disk Shape
+        block = 'minecraft:brown_mushroom_block'
+        radius = random.randint(3, 5)
+        
+        # Main flat disk
+        for lx in range(x - radius, x + radius + 1):
+            for lz in range(z - radius, z + radius + 1):
+                if math.sqrt((lx-x)**2 + (lz-z)**2) <= radius + 0.5:
+                     mc_world.set_block((lx, cap_center_y, lz), block)
 
 def place_cactus(mc_world, x, y, z):
     height = random.randint(1, 3)
@@ -270,18 +310,13 @@ def generate_islands(mc_world, island_layout_list):
 
                     # --- BIOME BLOCK SWAPS ---
                     
-                    # 1. Desert
                     if island.biome == 'minecraft:desert':
                         if block_type == 'minecraft:grass_block': block_type = 'minecraft:sand'
                         elif block_type == 'minecraft:dirt': block_type = 'minecraft:sandstone'
-                        
-                    # 2. Badlands (Mesa)
                     elif island.biome == 'minecraft:badlands':
                         if block_type == 'minecraft:grass_block': block_type = 'minecraft:red_sand'
                         elif block_type == 'minecraft:dirt': block_type = 'minecraft:red_sandstone'
                         elif block_type == 'minecraft:stone': block_type = 'minecraft:terracotta'
-                        
-                    # 3. Volcanic (Custom)
                     elif 'volcanic_biome' in island.biome:
                         if block_type in ['minecraft:grass_block', 'minecraft:dirt'] and random.random() < 0.25:
                             block_type = 'minecraft:gravel'
@@ -316,23 +351,28 @@ def generate_islands(mc_world, island_layout_list):
                          if is_next_to_water and random.random() < 0.05:
                              place_sugarcane(mc_world, x, top_y, z)
 
-                    # C. Trees, Cacti, Flowers, Dead Bushes
+                    # C. Trees, Cacti, Mushrooms, Flowers, Dead Bushes
                     else:
                         tree_chance = 0.005 
                         if 'forest' in island.biome: tree_chance = 0.02
                         elif 'jungle' in island.biome: tree_chance = 0.05
-                        # Desert and Badlands have same vegetation logic (Cactus)
                         elif 'desert' in island.biome or 'badlands' in island.biome: 
                             tree_chance = 0.01 
                         
                         if random.random() < tree_chance:
                             if island.biome == 'minecraft:desert' or island.biome == 'minecraft:badlands':
-                                # Cactus needs Sand or Red Sand
                                 if surface_block in ['minecraft:sand', 'minecraft:red_sand']:
                                     place_cactus(mc_world, x, top_y, z)
                             else:
                                 if surface_block == 'minecraft:grass_block':
-                                    place_tree(mc_world, x, top_y + 1, z, island.biome)
+                                    
+                                    # --- DARK FOREST MUSHROOM CHECK ---
+                                    # If Dark Forest, 25% chance to be Big Mushroom instead of tree
+                                    if 'dark_forest' in island.biome and random.random() < 0.25:
+                                        m_type = random.choice(['red', 'brown'])
+                                        place_big_mushroom(mc_world, x, top_y + 1, z, m_type)
+                                    else:
+                                        place_tree(mc_world, x, top_y + 1, z, island.biome)
                         
                         # D. Ground Cover
                         else:
@@ -342,13 +382,12 @@ def generate_islands(mc_world, island_layout_list):
                                 if random.random() < 0.015: 
                                     mc_world.set_block((x, top_y + 1, z), 'minecraft:dead_bush')
                             
-                            # 2. GRASSY BIOMES -> Grass or Flower
+                            # 2. GRASSY BIOMES -> Grass or Flower (includes Small Mushrooms for Dark Forest)
                             elif surface_block == 'minecraft:grass_block':
                                 
-                                # 5% total chance for ground cover
                                 if random.random() < 0.05: 
                                     
-                                    # 10% of ground cover is flower
+                                    # 10% of ground cover is flower (or small mushroom)
                                     if random.random() < 0.10:
                                         flower_type = get_random_flower(island.biome)
                                         
@@ -378,7 +417,7 @@ def main():
     biome_liquids = {biome: 'minecraft:water' for biome in STANDARD_BIOMES}
     biome_liquids[volcanic_biome.full_name] = 'minecraft:lava'
     
-    island_layout = generate_island_layout(biome_liquid_map=biome_liquids, spawn_r_override=128)
+    island_layout = generate_island_layout(biome_liquid_map=biome_liquids, spawn_r_override=256)
     spawn_y = generate_islands(mc_world, island_layout)
 
     mc_world.set_spawn((0, spawn_y, 0))
