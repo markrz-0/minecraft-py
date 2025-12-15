@@ -5,11 +5,11 @@ from noise import pnoise2, snoise3
 from minecraft import MinecraftWorld, CustomBiome, IntColor
 
 # --- Configuration ---
-NUM_ISLANDS = 30
+NUM_ISLANDS = 100
 ISLAND_RADIUS_MIN = 16
-ISLAND_RADIUS_MAX = 256
+ISLAND_RADIUS_MAX = 64
 ISLAND_Y_LEVEL = 60
-ISLAND_SPREAD = 500
+ISLAND_SPREAD = 300
 
 # Standard biomes
 STANDARD_BIOMES = [
@@ -130,61 +130,67 @@ def place_tree(mc_world, x, y, z, biome_name):
 
     leaves = f"{leaves}[persistent=true]"
 
-    # --- 3. Vine Helper: Spawn Column at Side ---
+    # --- 3a. Vine Helper ---
     def try_spawn_vine_column(src_x, src_y, src_z):
-        """
-        Checks the 4 cardinal neighbors of the block at (src_x, src_y, src_z).
-        If a neighbor is air, randomly decides to place a vine column there.
-        The vine column maintains the direction of the anchor point.
-        """
         if 'jungle' not in biome_name and 'swamp' not in biome_name:
             return
 
-        # Vine chance per side
         chance = 0.15 if 'jungle' in biome_name else 0.10
         min_len = 3
         max_len = 8 if 'jungle' in biome_name else 5
 
-        # Directions: (dx, dz, prop_string)
-        # Note: If the tree block is at (x, z), and we place a vine at (x, z-1) [North],
-        # the vine attaches to the South face of the air block (towards the tree).
-        # Minecraft Vine states: "south=true" means the vine is on the South face of the block space,
-        # attaching to the block to its South.
-        
-        # Neighbor North (z-1): Attaches to block at South (the tree) -> "south=true"
-        # Neighbor South (z+1): Attaches to block at North (the tree) -> "north=true"
-        # Neighbor West (x-1):  Attaches to block at East (the tree)  -> "east=true"
-        # Neighbor East (x+1):  Attaches to block at West (the tree)  -> "west=true"
-        
+        # Neighbors: (dx, dz, prop_string)
         neighbors = [
-            (0, -1, "south=true"), # Air is North, Vine attaches South to tree
-            (0, 1, "north=true"),  # Air is South, Vine attaches North to tree
-            (-1, 0, "east=true"),  # Air is West, Vine attaches East to tree
-            (1, 0, "west=true")    # Air is East, Vine attaches West to tree
+            (0, -1, "south=true"), 
+            (0, 1, "north=true"),  
+            (-1, 0, "east=true"),  
+            (1, 0, "west=true")    
         ]
 
         for dx, dz, prop in neighbors:
             target_x = src_x + dx
             target_z = src_z + dz
             
-            # 1. Check if potential vine spot is Air
             if mc_world.get_block((target_x, src_y, target_z)) == 'minecraft:air':
-                # 2. Random Chance
                 if random.random() < chance:
-                    # 3. Build Column Downwards
                     length = random.randint(min_len, max_len)
                     for i in range(length):
                         vy = src_y - i
-                        
-                        # Stop if we hit non-air (ground/other tree)
-                        # We allow placing the FIRST block even if it's air (checked above)
                         if i > 0:
                             current = mc_world.get_block((target_x, vy, target_z))
-                            if current != 'minecraft:air':
-                                break
-                        
-                        # Place Vine with FIXED property
+                            if current != 'minecraft:air': break
                         mc_world.set_block((target_x, vy, target_z), f"minecraft:vine[{prop}]")
+
+    # --- 3b. Cocoa Helper ---
+    def try_spawn_cocoa(src_x, src_y, src_z):
+        """
+        Spawns cocoa pods on the sides of jungle logs.
+        The 'facing' property must point TOWARDS the log.
+        """
+        if 'jungle' not in biome_name:
+            return
+            
+        # Chance to spawn a pod on this log block
+        if random.random() > 0.15: # 15% chance per log block to attempt spawning
+            return
+
+        # Neighbors: (dx, dz, facing_dir)
+        # If the pod is at (x+1), it is EAST of the log, so it must FACE WEST to touch the log.
+        neighbors = [
+            (0, -1, "south"), # Pod is North (z-1), faces South to touch log
+            (0, 1, "north"),  # Pod is South (z+1), faces North to touch log
+            (-1, 0, "east"),  # Pod is West (x-1), faces East to touch log
+            (1, 0, "west")    # Pod is East (x+1), faces West to touch log
+        ]
+        
+        # Pick one random side to try (don't cover the whole tree in pods)
+        dx, dz, facing = random.choice(neighbors)
+        target_x = src_x + dx
+        target_z = src_z + dz
+        
+        if mc_world.get_block((target_x, src_y, target_z)) == 'minecraft:air':
+            age = random.randint(0, 2)
+            mc_world.set_block((target_x, src_y, target_z), f"minecraft:cocoa[facing={facing},age={age}]")
 
 
     # 4. Generate Shape
@@ -195,9 +201,9 @@ def place_tree(mc_world, x, y, z, biome_name):
         # Trunk
         for i in range(height):
             mc_world.set_block((x, y + i, z), log)
-            # Try vines on trunk if Jungle
             if 'jungle' in biome_name:
                 try_spawn_vine_column(x, y + i, z)
+                try_spawn_cocoa(x, y + i, z) # Cocoa check
 
         leaf_start = y + height - 2
         for ly in range(leaf_start, leaf_start + 4):
@@ -210,7 +216,6 @@ def place_tree(mc_world, x, y, z, biome_name):
                     if d <= radius + 0.5:
                          if random.random() > 0.15: 
                              mc_world.set_block((lx, ly, lz), leaves)
-                             # Try vines on leaves
                              try_spawn_vine_column(lx, ly, lz)
 
     elif shape == 'pine':
@@ -224,7 +229,6 @@ def place_tree(mc_world, x, y, z, biome_name):
                     if lx == x and lz == z and current_y < y + height: continue
                     if math.sqrt((lx-x)**2 + (lz-z)**2) <= current_r + 0.5:
                         mc_world.set_block((lx, current_y, lz), leaves)
-                        # Pines usually don't have vines, but if swamp/jungle logic applied:
                         try_spawn_vine_column(lx, current_y, lz)
             current_y += 1
             if current_r > 0: current_r -= 1
@@ -261,11 +265,12 @@ def place_tree(mc_world, x, y, z, biome_name):
 
     elif shape == 'tall':
         height = random.randint(10, 14)
-        # Trunk with vine check
+        # Trunk
         for i in range(height):
             mc_world.set_block((x, y + i, z), log)
             if 'jungle' in biome_name:
                 try_spawn_vine_column(x, y + i, z)
+                try_spawn_cocoa(x, y + i, z) # Cocoa check
 
         leaf_start = y + height - 3
         for ly in range(leaf_start, leaf_start + 4):
@@ -410,7 +415,7 @@ def generate_islands(mc_world, island_layout_list):
                 # Place Column
                 for y in range(bottom_y, top_y + 1):
                     cave_noise = get_cave_density(x, y, z, SEED + 200, SCALE_CAVE)
-                    if cave_noise > CAVE_THRESHOLD and y <= island.water_level - 3:
+                    if cave_noise > CAVE_THRESHOLD and y <= island.water_level - 3 and 'volcanic_biome' not in island.biome:
                         continue 
 
                     depth = top_y - y
@@ -437,7 +442,20 @@ def generate_islands(mc_world, island_layout_list):
                             block_type = 'minecraft:gravel'
                         elif block_type == 'minecraft:deepslate' and random.random() < 0.15:
                             block_type = 'minecraft:obsidian'
+                        elif block_type in ['minecraft:stone', 'minecraft:deepslate'] and random.random() < 0.15:
+                            # 1. Horizontal Safety: Keep lava away from the side edges
+                            is_horizontal_safe = dist < (0.8 * island.radius)
+                            
+                            # 2. Vertical Safety: Keep lava away from the top surface and bottom void
+                            # We ensure it is at least 3 blocks below the surface and 3 blocks above the bottom
+                            is_vertical_safe = (y < top_y - 3) and (y > bottom_y + 3)
 
+                            if is_horizontal_safe and is_vertical_safe:
+                                block_type = 'minecraft:lava'
+                            else:
+                                # If it's too close to any edge, use Magma (solid/safe)
+                                block_type = 'minecraft:magma_block'
+ 
                     mc_world.set_block((x, y, z), block_type)
 
                 # 3. Liquids & Surface Decoration
@@ -541,7 +559,7 @@ def main():
     biome_liquids = {biome: 'minecraft:water' for biome in STANDARD_BIOMES}
     biome_liquids[volcanic_biome.full_name] = 'minecraft:lava'
     
-    island_layout = generate_island_layout(biome_liquid_map=biome_liquids, spawn_r_override=256)
+    island_layout = generate_island_layout(biome_liquid_map=biome_liquids, spawn_r_override=64)
     spawn_y = generate_islands(mc_world, island_layout)
 
     mc_world.set_spawn((0, spawn_y, 0))
