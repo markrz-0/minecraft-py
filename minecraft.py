@@ -5,6 +5,7 @@ import random
 import os
 import numpy as np
 import json
+import re
 import nbtlib
 from nbtlib import Compound, String, List, LongArray, Int, Long, Byte, Double, Float
 
@@ -19,6 +20,29 @@ MINECRAFT_DIFFICULTY_EASY = 1
 MINECRAFT_DIFFICULTY_NORMAL = 2
 MINECRAFT_DIFFICULTY_HARD = 3
 
+def parse_block_string(full_block_name):
+    """
+    Parses 'minecraft:leaves[persistent=true,distance=7]' 
+    into ('minecraft:leaves', {'persistent': 'true', 'distance': '7'})
+    """
+    # Regex to capture "Name" and optional "[Properties]"
+    match = re.match(r'([^\[]+)(?:\[(.*)\])?', full_block_name)
+    if not match:
+        return full_block_name, {}
+
+    base_name = match.group(1)
+    properties_string = match.group(2)
+    
+    properties = {}
+    if properties_string:
+        # Split "key=val,key2=val2"
+        pairs = properties_string.split(',')
+        for pair in pairs:
+            if '=' in pair:
+                key, value = pair.split('=', 1)
+                properties[key] = value
+                
+    return base_name, properties
 
 def pack_integers(indices, palette_size, min_bits=1):
     """
@@ -120,8 +144,24 @@ class Section:
 
     # --- EXPORT ---
     def to_nbt(self):
-        # 1. Blocks
-        block_palette_nbt = List[Compound]([Compound({'Name': String(n)}) for n in self.block_palette])
+        # 1. Blocks Palette Construction
+        palette_nbt_list = []
+        
+        for raw_name in self.block_palette:
+            base_name, properties = parse_block_string(raw_name)
+            
+            # Create the NBT Compound for this palette entry
+            block_tag = {'Name': String(base_name)}
+            
+            # If we found properties (e.g. persistent=true), add them
+            if properties:
+                # Note: Property values must strictly be Strings in NBT
+                props_nbt = {k: String(v) for k, v in properties.items()}
+                block_tag['Properties'] = Compound(props_nbt)
+                
+            palette_nbt_list.append(Compound(block_tag))
+
+        block_palette_nbt = List[Compound](palette_nbt_list)
         block_states = Compound({'palette': block_palette_nbt})
         
         # FIX: Force min_bits=4 for Blocks

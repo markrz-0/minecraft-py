@@ -40,7 +40,7 @@ BIOME_FLOWERS = {
     'birch': ['minecraft:dandelion', 'minecraft:poppy', 'minecraft:lilac'],
     'dark_forest': ['minecraft:rose_bush', 'minecraft:peony', 'minecraft:lily_of_the_valley', 'minecraft:brown_mushroom', 'minecraft:red_mushroom'],
     'cherry': ['minecraft:pink_petals'],
-    'taiga': ['minecraft:fern'], # Berry bushes handled separately now
+    'taiga': ['minecraft:fern'],
     'snowy': ['minecraft:dandelion', 'minecraft:poppy']
 }
 
@@ -128,11 +128,77 @@ def place_tree(mc_world, x, y, z, biome_name):
         leaves = 'minecraft:oak_leaves'
         shape = 'standard' 
 
-    # 3. Generate Shape
+    leaves = f"{leaves}[persistent=true]"
+
+    # --- 3. Vine Helper: Spawn Column at Side ---
+    def try_spawn_vine_column(src_x, src_y, src_z):
+        """
+        Checks the 4 cardinal neighbors of the block at (src_x, src_y, src_z).
+        If a neighbor is air, randomly decides to place a vine column there.
+        The vine column maintains the direction of the anchor point.
+        """
+        if 'jungle' not in biome_name and 'swamp' not in biome_name:
+            return
+
+        # Vine chance per side
+        chance = 0.15 if 'jungle' in biome_name else 0.10
+        min_len = 3
+        max_len = 8 if 'jungle' in biome_name else 5
+
+        # Directions: (dx, dz, prop_string)
+        # Note: If the tree block is at (x, z), and we place a vine at (x, z-1) [North],
+        # the vine attaches to the South face of the air block (towards the tree).
+        # Minecraft Vine states: "south=true" means the vine is on the South face of the block space,
+        # attaching to the block to its South.
+        
+        # Neighbor North (z-1): Attaches to block at South (the tree) -> "south=true"
+        # Neighbor South (z+1): Attaches to block at North (the tree) -> "north=true"
+        # Neighbor West (x-1):  Attaches to block at East (the tree)  -> "east=true"
+        # Neighbor East (x+1):  Attaches to block at West (the tree)  -> "west=true"
+        
+        neighbors = [
+            (0, -1, "south=true"), # Air is North, Vine attaches South to tree
+            (0, 1, "north=true"),  # Air is South, Vine attaches North to tree
+            (-1, 0, "east=true"),  # Air is West, Vine attaches East to tree
+            (1, 0, "west=true")    # Air is East, Vine attaches West to tree
+        ]
+
+        for dx, dz, prop in neighbors:
+            target_x = src_x + dx
+            target_z = src_z + dz
+            
+            # 1. Check if potential vine spot is Air
+            if mc_world.get_block((target_x, src_y, target_z)) == 'minecraft:air':
+                # 2. Random Chance
+                if random.random() < chance:
+                    # 3. Build Column Downwards
+                    length = random.randint(min_len, max_len)
+                    for i in range(length):
+                        vy = src_y - i
+                        
+                        # Stop if we hit non-air (ground/other tree)
+                        # We allow placing the FIRST block even if it's air (checked above)
+                        if i > 0:
+                            current = mc_world.get_block((target_x, vy, target_z))
+                            if current != 'minecraft:air':
+                                break
+                        
+                        # Place Vine with FIXED property
+                        mc_world.set_block((target_x, vy, target_z), f"minecraft:vine[{prop}]")
+
+
+    # 4. Generate Shape
     if shape == 'standard':
         height = random.randint(5, 7)
         if 'birch' in biome_name: height += 2 
-        mc_world.fill_blocks((x, y, z), (x, y + height - 1, z), log)
+        
+        # Trunk
+        for i in range(height):
+            mc_world.set_block((x, y + i, z), log)
+            # Try vines on trunk if Jungle
+            if 'jungle' in biome_name:
+                try_spawn_vine_column(x, y + i, z)
+
         leaf_start = y + height - 2
         for ly in range(leaf_start, leaf_start + 4):
             radius = 2
@@ -144,6 +210,8 @@ def place_tree(mc_world, x, y, z, biome_name):
                     if d <= radius + 0.5:
                          if random.random() > 0.15: 
                              mc_world.set_block((lx, ly, lz), leaves)
+                             # Try vines on leaves
+                             try_spawn_vine_column(lx, ly, lz)
 
     elif shape == 'pine':
         height = random.randint(7, 10)
@@ -156,6 +224,8 @@ def place_tree(mc_world, x, y, z, biome_name):
                     if lx == x and lz == z and current_y < y + height: continue
                     if math.sqrt((lx-x)**2 + (lz-z)**2) <= current_r + 0.5:
                         mc_world.set_block((lx, current_y, lz), leaves)
+                        # Pines usually don't have vines, but if swamp/jungle logic applied:
+                        try_spawn_vine_column(lx, current_y, lz)
             current_y += 1
             if current_r > 0: current_r -= 1
             else: current_r = 1 
@@ -171,6 +241,7 @@ def place_tree(mc_world, x, y, z, biome_name):
                     d = math.sqrt((lx - (x+0.5))**2 + (lz - (z+0.5))**2)
                     if d <= radius + 0.8:
                         mc_world.set_block((lx, ly, lz), leaves)
+                        try_spawn_vine_column(lx, ly, lz)
 
     elif shape == 'acacia':
         height = random.randint(5, 6)
@@ -190,7 +261,12 @@ def place_tree(mc_world, x, y, z, biome_name):
 
     elif shape == 'tall':
         height = random.randint(10, 14)
-        mc_world.fill_blocks((x, y, z), (x, y + height - 1, z), log)
+        # Trunk with vine check
+        for i in range(height):
+            mc_world.set_block((x, y + i, z), log)
+            if 'jungle' in biome_name:
+                try_spawn_vine_column(x, y + i, z)
+
         leaf_start = y + height - 3
         for ly in range(leaf_start, leaf_start + 4):
             radius = 3 if ly < leaf_start + 2 else 2
@@ -199,6 +275,7 @@ def place_tree(mc_world, x, y, z, biome_name):
                     if lx == x and lz == z and ly < y + height: continue
                     if random.random() < 0.8:
                         mc_world.set_block((lx, ly, lz), leaves)
+                        try_spawn_vine_column(lx, ly, lz)
 
 
 def place_big_mushroom(mc_world, x, y, z, mushroom_type='red'):
@@ -420,23 +497,21 @@ def generate_islands(mc_world, island_layout_list):
                             # 2. GRASSY BIOMES
                             elif surface_block == 'minecraft:grass_block':
                                 
-                                # --- SPECIAL GROUND CROPS (Melons, Pumpkins, Berries) ---
                                 placed_crop = False
                                 
                                 if 'taiga' in island.biome:
-                                    if random.random() < 0.01: # 1% Pumpkin
+                                    if random.random() < 0.01:
                                         mc_world.set_block((x, top_y + 1, z), 'minecraft:pumpkin')
                                         placed_crop = True
-                                    elif random.random() < 0.04: # 4% Sweet Berry Bush
+                                    elif random.random() < 0.04:
                                         mc_world.set_block((x, top_y + 1, z), 'minecraft:sweet_berry_bush[age=2]')
                                         placed_crop = True
                                         
                                 elif 'jungle' in island.biome:
-                                    if random.random() < 0.01: # 1% Melon
+                                    if random.random() < 0.01:
                                         mc_world.set_block((x, top_y + 1, z), 'minecraft:melon')
                                         placed_crop = True
                                         
-                                # --- GENERIC FLORA (Grass/Flowers) ---
                                 if not placed_crop and random.random() < 0.05: 
                                     if random.random() < 0.10:
                                         flower_type = get_random_flower(island.biome)
