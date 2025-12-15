@@ -5,11 +5,11 @@ from noise import pnoise2, snoise3
 from minecraft import MinecraftWorld, CustomBiome, IntColor
 
 # --- Configuration ---
-NUM_ISLANDS = 30
+NUM_ISLANDS = 64
 ISLAND_RADIUS_MIN = 16
-ISLAND_RADIUS_MAX = 256
+ISLAND_RADIUS_MAX = 128
 ISLAND_Y_LEVEL = 60
-ISLAND_SPREAD = 500
+ISLAND_SPREAD = 800
 
 # Standard biomes
 STANDARD_BIOMES = [
@@ -268,10 +268,20 @@ def generate_islands(mc_world, island_layout_list):
                     elif depth < 15: block_type = 'minecraft:stone'
                     else: block_type = 'minecraft:deepslate'
 
-                    # Swaps
+                    # --- BIOME BLOCK SWAPS ---
+                    
+                    # 1. Desert
                     if island.biome == 'minecraft:desert':
                         if block_type == 'minecraft:grass_block': block_type = 'minecraft:sand'
                         elif block_type == 'minecraft:dirt': block_type = 'minecraft:sandstone'
+                        
+                    # 2. Badlands (Mesa)
+                    elif island.biome == 'minecraft:badlands':
+                        if block_type == 'minecraft:grass_block': block_type = 'minecraft:red_sand'
+                        elif block_type == 'minecraft:dirt': block_type = 'minecraft:red_sandstone'
+                        elif block_type == 'minecraft:stone': block_type = 'minecraft:terracotta'
+                        
+                    # 3. Volcanic (Custom)
                     elif 'volcanic_biome' in island.biome:
                         if block_type in ['minecraft:grass_block', 'minecraft:dirt'] and random.random() < 0.25:
                             block_type = 'minecraft:gravel'
@@ -294,7 +304,7 @@ def generate_islands(mc_world, island_layout_list):
                     # B. Sugarcane
                     elif island.liquid_block == 'minecraft:water' and \
                          top_y == island.water_level and \
-                         surface_block in ['minecraft:grass_block', 'minecraft:sand', 'minecraft:dirt']:
+                         surface_block in ['minecraft:grass_block', 'minecraft:sand', 'minecraft:dirt', 'minecraft:red_sand']:
                          
                          is_next_to_water = False
                          for dx, dz in [(1,0), (-1,0), (0,1), (0,-1)]:
@@ -311,11 +321,14 @@ def generate_islands(mc_world, island_layout_list):
                         tree_chance = 0.005 
                         if 'forest' in island.biome: tree_chance = 0.02
                         elif 'jungle' in island.biome: tree_chance = 0.05
-                        elif 'desert' in island.biome: tree_chance = 0.01 
+                        # Desert and Badlands have same vegetation logic (Cactus)
+                        elif 'desert' in island.biome or 'badlands' in island.biome: 
+                            tree_chance = 0.01 
                         
                         if random.random() < tree_chance:
-                            if island.biome == 'minecraft:desert':
-                                if surface_block == 'minecraft:sand':
+                            if island.biome == 'minecraft:desert' or island.biome == 'minecraft:badlands':
+                                # Cactus needs Sand or Red Sand
+                                if surface_block in ['minecraft:sand', 'minecraft:red_sand']:
                                     place_cactus(mc_world, x, top_y, z)
                             else:
                                 if surface_block == 'minecraft:grass_block':
@@ -323,18 +336,19 @@ def generate_islands(mc_world, island_layout_list):
                         
                         # D. Ground Cover
                         else:
-                            # 1. DESERT -> Dead Bush
-                            if island.biome == 'minecraft:desert' and surface_block == 'minecraft:sand':
-                                if random.random() < 0.015:  # Reduced to 1.5%
+                            # 1. DESERT & BADLANDS -> Dead Bush
+                            if (island.biome == 'minecraft:desert' and surface_block == 'minecraft:sand') or \
+                               (island.biome == 'minecraft:badlands' and surface_block == 'minecraft:red_sand'):
+                                if random.random() < 0.015: 
                                     mc_world.set_block((x, top_y + 1, z), 'minecraft:dead_bush')
                             
                             # 2. GRASSY BIOMES -> Grass or Flower
                             elif surface_block == 'minecraft:grass_block':
                                 
-                                # Chance for ANY ground cover (grass or flower) reduced to 5%
+                                # 5% total chance for ground cover
                                 if random.random() < 0.05: 
                                     
-                                    # Inside that 5%, only 10% chance for a flower
+                                    # 10% of ground cover is flower
                                     if random.random() < 0.10:
                                         flower_type = get_random_flower(island.biome)
                                         
@@ -344,7 +358,6 @@ def generate_islands(mc_world, island_layout_list):
                                         else:
                                             mc_world.set_block((x, top_y + 1, z), flower_type)
                                     else:
-                                        # 90% chance it's just grass/fern
                                         vegetation_type = 'minecraft:grass'
                                         if 'taiga' in island.biome:
                                             vegetation_type = 'minecraft:fern'
@@ -365,7 +378,7 @@ def main():
     biome_liquids = {biome: 'minecraft:water' for biome in STANDARD_BIOMES}
     biome_liquids[volcanic_biome.full_name] = 'minecraft:lava'
     
-    island_layout = generate_island_layout(biome_liquid_map=biome_liquids, spawn_r_override=256)
+    island_layout = generate_island_layout(biome_liquid_map=biome_liquids, spawn_r_override=128)
     spawn_y = generate_islands(mc_world, island_layout)
 
     mc_world.set_spawn((0, spawn_y, 0))
