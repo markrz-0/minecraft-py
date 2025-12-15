@@ -40,7 +40,7 @@ BIOME_FLOWERS = {
     'birch': ['minecraft:dandelion', 'minecraft:poppy', 'minecraft:lilac'],
     'dark_forest': ['minecraft:rose_bush', 'minecraft:peony', 'minecraft:lily_of_the_valley', 'minecraft:brown_mushroom', 'minecraft:red_mushroom'],
     'cherry': ['minecraft:pink_petals'],
-    'taiga': ['minecraft:fern', 'minecraft:sweet_berry_bush'], 
+    'taiga': ['minecraft:fern'], # Berry bushes handled separately now
     'snowy': ['minecraft:dandelion', 'minecraft:poppy']
 }
 
@@ -93,9 +93,6 @@ def calculate_surface_y(x, z, island):
 # --- Vegetation Logic ---
 
 def place_tree(mc_world, x, y, z, biome_name):
-    """
-    Procedurally generates diverse tree shapes based on biome.
-    """
     # 1. Defaults
     log = 'minecraft:oak_log'
     leaves = 'minecraft:oak_leaves'
@@ -109,11 +106,11 @@ def place_tree(mc_world, x, y, z, biome_name):
     elif 'birch' in biome_name:
         log = 'minecraft:birch_log'
         leaves = 'minecraft:birch_leaves'
-        shape = 'standard' # Birch is standard but tall
+        shape = 'standard' 
     elif 'jungle' in biome_name:
         log = 'minecraft:jungle_log'
         leaves = 'minecraft:jungle_leaves'
-        shape = 'tall' # Jungle trees are taller
+        shape = 'tall' 
     elif 'acacia' in biome_name or 'savanna' in biome_name:
         log = 'minecraft:acacia_log'
         leaves = 'minecraft:acacia_leaves'
@@ -121,7 +118,7 @@ def place_tree(mc_world, x, y, z, biome_name):
     elif 'dark_forest' in biome_name:
         log = 'minecraft:dark_oak_log'
         leaves = 'minecraft:dark_oak_leaves'
-        shape = 'thick' # Dark oak is 2x2
+        shape = 'thick' 
     elif 'cherry' in biome_name:
         log = 'minecraft:cherry_log'
         leaves = 'minecraft:cherry_leaves'
@@ -129,103 +126,71 @@ def place_tree(mc_world, x, y, z, biome_name):
     elif 'swamp' in biome_name:
         log = 'minecraft:oak_log'
         leaves = 'minecraft:oak_leaves'
-        shape = 'standard' # Swamp oaks are standard but often in water
+        shape = 'standard' 
 
     # 3. Generate Shape
-    
     if shape == 'standard':
-        # Simple trunk + spherical leaf blob
         height = random.randint(5, 7)
-        if 'birch' in biome_name: height += 2 # Birch is taller
-        
+        if 'birch' in biome_name: height += 2 
         mc_world.fill_blocks((x, y, z), (x, y + height - 1, z), log)
-        
         leaf_start = y + height - 2
         for ly in range(leaf_start, leaf_start + 4):
             radius = 2
-            if ly == leaf_start + 3: radius = 1 # Top is pointy
-            
+            if ly == leaf_start + 3: radius = 1 
             for lx in range(x - radius, x + radius + 1):
                 for lz in range(z - radius, z + radius + 1):
-                    # Don't replace trunk
                     if lx == x and lz == z and ly < y + height: continue
-                    # Round corners
                     d = math.sqrt((lx-x)**2 + (lz-z)**2)
                     if d <= radius + 0.5:
-                         if random.random() > 0.15: # Random gaps
+                         if random.random() > 0.15: 
                              mc_world.set_block((lx, ly, lz), leaves)
 
     elif shape == 'pine':
-        # Tall trunk + cone layers
         height = random.randint(7, 10)
         mc_world.fill_blocks((x, y, z), (x, y + height - 1, z), log)
-        
-        # Cone logic: alternate radius 2 and 1 going up
         current_y = y + 3
         current_r = 3
         while current_y < y + height + 1:
             for lx in range(x - current_r, x + current_r + 1):
                 for lz in range(z - current_r, z + current_r + 1):
                     if lx == x and lz == z and current_y < y + height: continue
-                    
                     if math.sqrt((lx-x)**2 + (lz-z)**2) <= current_r + 0.5:
                         mc_world.set_block((lx, current_y, lz), leaves)
-            
             current_y += 1
-            if current_r > 0:
-                current_r -= 1
-            else:
-                current_r = 1 # Top tip
+            if current_r > 0: current_r -= 1
+            else: current_r = 1 
 
     elif shape == 'thick':
-        # Dark Oak: 2x2 Trunk + Wide Canopy
         height = random.randint(6, 8)
-        
-        # 2x2 Trunk
         mc_world.fill_blocks((x, y, z), (x+1, y + height - 1, z+1), log)
-        
-        # Wide Cap
         leaf_start = y + height - 2
         for ly in range(leaf_start, leaf_start + 3):
             radius = 4 if ly == leaf_start else 2
-            
             for lx in range(x - radius, x + radius + 2):
                 for lz in range(z - radius, z + radius + 2):
-                    # Check distance from center of the 2x2 trunk (x+0.5, z+0.5)
                     d = math.sqrt((lx - (x+0.5))**2 + (lz - (z+0.5))**2)
                     if d <= radius + 0.8:
                         mc_world.set_block((lx, ly, lz), leaves)
 
     elif shape == 'acacia':
-        # Forked trunk
         height = random.randint(5, 6)
-        
-        # Base
         mc_world.fill_blocks((x, y, z), (x, y + 2, z), log)
-        
-        # Branch 1 (Diagonal Up-Right)
         for i in range(1, 4):
             mc_world.set_block((x + i, y + 2 + i, z), log)
-            # Leaf Pad 1
             if i == 3:
                 for lx in range(x+i - 2, x+i + 3):
                     for lz in range(z - 2, z + 3):
                         mc_world.set_block((lx, y+2+i, lz), leaves)
-                        
-        # Branch 2 (Diagonal Up-Left)
         for i in range(1, 3):
             mc_world.set_block((x - i, y + 2 + i, z), log)
-            # Leaf Pad 2
             if i == 2:
                 for lx in range(x-i - 2, x-i + 3):
                     for lz in range(z - 2, z + 3):
                         mc_world.set_block((lx, y+2+i, lz), leaves)
 
     elif shape == 'tall':
-        # Jungle: Very tall thin trunk, leaves only at top
         height = random.randint(10, 14)
         mc_world.fill_blocks((x, y, z), (x, y + height - 1, z), log)
-        
         leaf_start = y + height - 3
         for ly in range(leaf_start, leaf_start + 4):
             radius = 3 if ly < leaf_start + 2 else 2
@@ -446,13 +411,33 @@ def generate_islands(mc_world, island_layout_list):
                         
                         # D. Ground Cover
                         else:
+                            # 1. DESERT & BADLANDS -> Dead Bush
                             if (island.biome == 'minecraft:desert' and surface_block == 'minecraft:sand') or \
                                (island.biome == 'minecraft:badlands' and surface_block == 'minecraft:red_sand'):
                                 if random.random() < 0.015: 
                                     mc_world.set_block((x, top_y + 1, z), 'minecraft:dead_bush')
                             
+                            # 2. GRASSY BIOMES
                             elif surface_block == 'minecraft:grass_block':
-                                if random.random() < 0.05: 
+                                
+                                # --- SPECIAL GROUND CROPS (Melons, Pumpkins, Berries) ---
+                                placed_crop = False
+                                
+                                if 'taiga' in island.biome:
+                                    if random.random() < 0.01: # 1% Pumpkin
+                                        mc_world.set_block((x, top_y + 1, z), 'minecraft:pumpkin')
+                                        placed_crop = True
+                                    elif random.random() < 0.04: # 4% Sweet Berry Bush
+                                        mc_world.set_block((x, top_y + 1, z), 'minecraft:sweet_berry_bush[age=2]')
+                                        placed_crop = True
+                                        
+                                elif 'jungle' in island.biome:
+                                    if random.random() < 0.01: # 1% Melon
+                                        mc_world.set_block((x, top_y + 1, z), 'minecraft:melon')
+                                        placed_crop = True
+                                        
+                                # --- GENERIC FLORA (Grass/Flowers) ---
+                                if not placed_crop and random.random() < 0.05: 
                                     if random.random() < 0.10:
                                         flower_type = get_random_flower(island.biome)
                                         if flower_type in ['minecraft:rose_bush', 'minecraft:lilac', 'minecraft:peony']:
