@@ -5,11 +5,11 @@ from noise import pnoise2, snoise3
 from minecraft import MinecraftWorld, CustomBiome, IntColor
 
 # --- Configuration ---
-NUM_ISLANDS = 100
+NUM_ISLANDS = 1000
 ISLAND_RADIUS_MIN = 16
-ISLAND_RADIUS_MAX = 64
+ISLAND_RADIUS_MAX = 100
 ISLAND_Y_LEVEL = 60
-ISLAND_SPREAD = 300
+ISLAND_SPREAD = 1000
 
 # Standard biomes
 STANDARD_BIOMES = [
@@ -103,7 +103,7 @@ def place_tree(mc_world, x, y, z, biome_name):
         log = 'minecraft:spruce_log'
         leaves = 'minecraft:spruce_leaves'
         shape = 'pine'
-    elif 'birch' in biome_name:
+    elif 'birch' in biome_name or ('minecraft:forest' == biome_name and random.random() < 0.5):
         log = 'minecraft:birch_log'
         leaves = 'minecraft:birch_leaves'
         shape = 'standard' 
@@ -335,6 +335,20 @@ def create_volcanic_biome():
         grass=IntColor.from_hex("#363636")
     )
     volcanic.set_particles("minecraft:white_ash", probability=0.1)
+    volcanic.add_mob_spawn(
+        category="monster", 
+        entity_name="minecraft:witch", 
+        weight=10,       # Higher = spawns more often compared to other mobs
+        min_count=4,     # Minimum mobs per pack
+        max_count=4      # Maximum mobs per pack
+    )
+    volcanic.add_mob_spawn(
+        category="monster", 
+        entity_name="minecraft:skeleton", 
+        weight=20,       # Higher = spawns more often compared to other mobs
+        min_count=4,     # Minimum mobs per pack
+        max_count=4      # Maximum mobs per pack
+    )
     return volcanic
 
 def generate_island_layout(biome_liquid_map, spawn_r_override=None):
@@ -345,7 +359,7 @@ def generate_island_layout(biome_liquid_map, spawn_r_override=None):
     spawn_r = spawn_r_override if spawn_r_override else random.randint(ISLAND_RADIUS_MIN, ISLAND_RADIUS_MAX)
     spawn_island = IslandData(
         x=0, z=0, radius=spawn_r, 
-        biome='minecraft:plains', 
+        biome='minecraft:forest', 
         has_lake=True, 
         water_level=ISLAND_Y_LEVEL - 2,
         liquid_block='minecraft:water'
@@ -353,11 +367,14 @@ def generate_island_layout(biome_liquid_map, spawn_r_override=None):
     islands_layout.append(spawn_island)
     
     attempts = 0
-    while len(islands_layout) < NUM_ISLANDS and attempts < 5000:
+    cr = ISLAND_RADIUS_MAX
+    while len(islands_layout) < NUM_ISLANDS and cr >= ISLAND_RADIUS_MIN:
         attempts += 1
         cx = random.randint(-ISLAND_SPREAD, ISLAND_SPREAD)
         cz = random.randint(-ISLAND_SPREAD, ISLAND_SPREAD)
-        cr = random.randint(ISLAND_RADIUS_MIN, ISLAND_RADIUS_MAX)
+        if attempts > 10000:
+            cr -= 1
+            attempts = 0
         
         collision = False
         for island in islands_layout:
@@ -559,7 +576,7 @@ def main():
     biome_liquids = {biome: 'minecraft:water' for biome in STANDARD_BIOMES}
     biome_liquids[volcanic_biome.full_name] = 'minecraft:lava'
     
-    island_layout = generate_island_layout(biome_liquid_map=biome_liquids, spawn_r_override=64)
+    island_layout = generate_island_layout(biome_liquid_map=biome_liquids, spawn_r_override=128)
     spawn_y = generate_islands(mc_world, island_layout)
 
     mc_world.set_spawn((0, spawn_y, 0))
