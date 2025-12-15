@@ -1,0 +1,10 @@
+[project]
+name = "minecraft-world-python"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "nbtlib>=2.0.4",
+    "noise>=1.2.2",
+]
