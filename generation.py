@@ -27,6 +27,44 @@ STANDARD_BIOMES = [
     'minecraft:cherry_grove'
 ]
 
+# --- Ore Configuration ---
+# Global chance for a stone/deepslate block to become an ore (0.05 = 5%)
+ORE_DENSITY = 0.05 
+
+# Dictionary of {Biome Keyword: {Ore Name: Weight}}
+# If a biome name matches the keyword, it uses that specific list.
+# 'default' is used if no other match is found.
+BIOME_ORES = {
+    'default': {
+        'minecraft:coal_ore': 40,
+        'minecraft:copper_ore': 30,
+        'minecraft:iron_ore': 20,
+        'minecraft:gold_ore': 10,
+        'minecraft:redstone_ore': 8,
+        'minecraft:lapis_ore': 5,
+        'minecraft:diamond_ore': 2,
+        'minecraft:emerald_ore': 1
+    },
+    'badlands': {
+        'minecraft:gold_ore': 50,  # Significantly more gold
+        'minecraft:coal_ore': 20,
+        'minecraft:iron_ore': 20,
+        'minecraft:copper_ore': 15,
+        'minecraft:diamond_ore': 2
+    },
+    'volcanic': {
+        'minecraft:coal_ore': 30,
+        'minecraft:gold_ore': 25
+    },
+    'snowy': {
+        'minecraft:coal_ore': 40,
+        'minecraft:iron_ore': 20,
+        'minecraft:emerald_ore': 5, # More emeralds in mountains/snow
+        'minecraft:lapis_ore': 5,
+        'minecraft:diamond_ore': 2
+    }
+}
+
 # --- Flower Configuration ---
 BIOME_FLOWERS = {
     'swamp': ['minecraft:blue_orchid'],
@@ -89,6 +127,43 @@ def calculate_surface_y(x, z, island):
             y = min_safe_height
             
     return y
+
+# --- Ore Logic ---
+
+def determine_ore(biome_name, host_block):
+    """
+    Decides if a block should become an ore based on biome weights.
+    Returns the new block string, or the original host_block if no ore is generated.
+    """
+    # 1. Global Density Check
+    if random.random() > ORE_DENSITY:
+        return host_block
+
+    # 2. Find correct dictionary for this biome
+    ore_weights = BIOME_ORES['default']
+    for key, val in BIOME_ORES.items():
+        if key in biome_name:
+            ore_weights = val
+            break
+            
+    # 3. Weighted Random Choice
+    ores = list(ore_weights.keys())
+    weights = list(ore_weights.values())
+    chosen_ore = random.choices(ores, weights=weights, k=1)[0]
+    
+    # 4. Deepslate Conversion
+    # If the surrounding rock is deepslate, try to use the deepslate version of the ore
+    if host_block == 'minecraft:deepslate':
+        # List of ores that actually have deepslate variants in Vanilla
+        has_deepslate_variant = [
+            'minecraft:coal_ore', 'minecraft:iron_ore', 'minecraft:gold_ore', 
+            'minecraft:copper_ore', 'minecraft:redstone_ore', 
+            'minecraft:lapis_ore', 'minecraft:diamond_ore', 'minecraft:emerald_ore'
+        ]
+        if chosen_ore in has_deepslate_variant:
+            return chosen_ore.replace("minecraft:", "minecraft:deepslate_")
+            
+    return chosen_ore
 
 # --- Vegetation Logic ---
 
@@ -473,6 +548,11 @@ def generate_islands(mc_world, island_layout_list):
                                 # If it's too close to any edge, use Magma (solid/safe)
                                 block_type = 'minecraft:magma_block'
  
+                    # --- ORE GENERATION ---
+                    # Only attempt ore placement in valid ground blocks
+                    if block_type in ['minecraft:stone', 'minecraft:deepslate']:
+                        block_type = determine_ore(island.biome, block_type)
+
                     mc_world.set_block((x, y, z), block_type)
 
                 # 3. Liquids & Surface Decoration
