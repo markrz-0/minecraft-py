@@ -5,13 +5,14 @@ from noise import pnoise2, snoise3
 from minecraft import MinecraftWorld, CustomBiome, IntColor
 
 # --- Configuration ---
-NUM_ISLANDS = 1000
+NUM_ISLANDS = 1000 # maximum. less will actually generate
 ISLAND_RADIUS_MIN = 16
-ISLAND_RADIUS_MAX = 100
+ISLAND_RADIUS_MAX = 32
+SPAWN_ISLAND_RADIUS = 24 # always forest biome
 ISLAND_Y_LEVEL = 60
-ISLAND_SPREAD = 1000
+ISLAND_SPREAD = 300 # playable area - square with sides with length 2 * ISLAND_SPREAD and center ant (0,0)
 
-# Standard biomes
+# Standard biomes (+ one custom volcanic [source of lava] added later [using datapacks])
 STANDARD_BIOMES = [
     'minecraft:plains',
     'minecraft:forest',
@@ -53,7 +54,7 @@ BIOME_ORES = {
         'minecraft:copper_ore': 15,
         'minecraft:diamond_ore': 2
     },
-    'volcanic': {
+    'volcanic': { # custom biome (datapacks)
         'minecraft:coal_ore': 30,
         'minecraft:gold_ore': 25
     },
@@ -667,12 +668,12 @@ def main():
     biome_liquids[volcanic_biome.full_name] = 'minecraft:lava'
     biome_liquids['minecraft:ice_spikes'] = 'minecraft:ice'
     
-    island_layout = generate_island_layout(biome_liquid_map=biome_liquids, spawn_r_override=128)
+    island_layout = generate_island_layout(biome_liquid_map=biome_liquids, spawn_r_override=SPAWN_ISLAND_RADIUS)
     spawn_y = generate_islands(mc_world, island_layout)
 
     mc_world.set_spawn((0, spawn_y, 0))
     print("Exporting world...")
-    mc_world.export('floating_islands')
+    mc_world.export('floating_islands', overwrite=True)
     print("Done!")
 
 if __name__ == "__main__":

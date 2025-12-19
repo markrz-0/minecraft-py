@@ -3,6 +3,7 @@ import zlib
 import time
 import random
 import os
+import shutil
 import numpy as np
 import json
 import re
@@ -390,8 +391,15 @@ class MinecraftWorldSimple:
                     biome_name
                 )
 
-    def export(self, folder_path):
-        if not os.path.exists(folder_path): os.makedirs(folder_path)
+    def export(self, folder_path, overwrite=False):
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path)
+        else:
+            if overwrite:
+                shutil.rmtree(folder_path)
+            else:
+                raise RuntimeError('Output directory already exists. Delete it or set overwrite=True')
+        
         region_folder = os.path.join(folder_path, 'region')
         if not os.path.exists(region_folder): os.makedirs(region_folder)
 
@@ -608,9 +616,9 @@ class MinecraftWorld(MinecraftWorldSimple):
         self.custom_biomes.append(biome)
         return biome
 
-    def export(self, folder_path):
+    def export(self, folder_path, overwrite=False):
         # 1. Export the standard Chunk/Level data
-        super().export(folder_path)
+        super().export(folder_path, overwrite)
         
         # 2. Generate the Datapack
         self._export_datapack(folder_path)
