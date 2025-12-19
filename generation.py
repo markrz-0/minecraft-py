@@ -24,7 +24,8 @@ STANDARD_BIOMES = [
     'minecraft:badlands',
     'minecraft:dark_forest',
     'minecraft:birch_forest',
-    'minecraft:cherry_grove'
+    'minecraft:cherry_grove',
+    'minecraft:ice_spikes'
 ]
 
 # --- Flower Configuration ---
@@ -454,23 +455,25 @@ def generate_islands(mc_world, island_layout_list):
                         if block_type == 'minecraft:grass_block': block_type = 'minecraft:red_sand'
                         elif block_type == 'minecraft:dirt': block_type = 'minecraft:red_sandstone'
                         elif block_type == 'minecraft:stone': block_type = 'minecraft:terracotta'
+                    
+                    # --- NEW: ICE ISLAND LOGIC ---
+                    elif island.biome == 'minecraft:ice_spikes':
+                        if block_type == 'minecraft:deepslate': block_type = 'minecraft:blue_ice'
+                        elif block_type == 'minecraft:stone': block_type = 'minecraft:packed_ice'
+                        elif block_type == 'minecraft:dirt': block_type = 'minecraft:ice'
+                        elif block_type == 'minecraft:grass_block': block_type = 'minecraft:snow_block'
+                    
                     elif 'volcanic_biome' in island.biome:
                         if block_type in ['minecraft:grass_block', 'minecraft:dirt'] and random.random() < 0.25:
                             block_type = 'minecraft:gravel'
                         elif block_type == 'minecraft:deepslate' and random.random() < 0.15:
                             block_type = 'minecraft:obsidian'
                         elif block_type in ['minecraft:stone', 'minecraft:deepslate'] and random.random() < 0.15:
-                            # 1. Horizontal Safety: Keep lava away from the side edges
                             is_horizontal_safe = dist < (0.8 * island.radius)
-                            
-                            # 2. Vertical Safety: Keep lava away from the top surface and bottom void
-                            # We ensure it is at least 3 blocks below the surface and 3 blocks above the bottom
                             is_vertical_safe = (y < top_y - 3) and (y > bottom_y + 3)
-
                             if is_horizontal_safe and is_vertical_safe:
                                 block_type = 'minecraft:lava'
                             else:
-                                # If it's too close to any edge, use Magma (solid/safe)
                                 block_type = 'minecraft:magma_block'
  
                     mc_world.set_block((x, y, z), block_type)
@@ -486,6 +489,13 @@ def generate_islands(mc_world, island_layout_list):
                     if 'volcanic_biome' in island.biome:
                         pass
                     
+                    # --- NEW: ICE ISLAND SURFACE (No plants, just variable snow) ---
+                    elif island.biome == 'minecraft:ice_spikes':
+                        # Place variable snow layers on top of the solid snow block
+                        if surface_block == 'minecraft:snow_block':
+                            layers = random.randint(1, 8)
+                            mc_world.set_block((x, top_y + 1, z), f"minecraft:snow[layers={layers}]")
+
                     # B. Sugarcane
                     elif island.liquid_block == 'minecraft:water' and \
                          top_y == island.water_level and \
@@ -567,7 +577,7 @@ def generate_islands(mc_world, island_layout_list):
     return spawn_y
 
 def main():
-    mc_world = MinecraftWorld(world_name="Detailed Flora Floating Islands")
+    mc_world = MinecraftWorld(world_name="Super Duper Floating Islands")
     
     volcanic_biome = create_volcanic_biome()
     mc_world.add_biome(volcanic_biome)
@@ -575,13 +585,14 @@ def main():
 
     biome_liquids = {biome: 'minecraft:water' for biome in STANDARD_BIOMES}
     biome_liquids[volcanic_biome.full_name] = 'minecraft:lava'
+    biome_liquids['minecraft:ice_spikes'] = 'minecraft:ice'
     
     island_layout = generate_island_layout(biome_liquid_map=biome_liquids, spawn_r_override=128)
     spawn_y = generate_islands(mc_world, island_layout)
 
     mc_world.set_spawn((0, spawn_y, 0))
     print("Exporting world...")
-    mc_world.export('detailed_flora_floating_islands')
+    mc_world.export('floating_islands')
     print("Done!")
 
 if __name__ == "__main__":
