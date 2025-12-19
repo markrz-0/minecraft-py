@@ -8,7 +8,7 @@ import numpy as np
 import json
 import re
 import nbtlib
-from nbtlib import Compound, String, List, LongArray, Int, Long, Byte, Double, Float
+from nbtlib import Compound, String, List, LongArray, Int, Long, Byte, Double, Float, IntArray, Short
 
 # --- CONSTANTS ---
 MINECRAFT_GAME_MODE_SURVIVAL = 0
@@ -21,15 +21,15 @@ MINECRAFT_DIFFICULTY_EASY = 1
 MINECRAFT_DIFFICULTY_NORMAL = 2
 MINECRAFT_DIFFICULTY_HARD = 3
 
-def parse_block_string(full_block_name):
+def parse_nbt_string(full_name):
     """
     Parses 'minecraft:leaves[persistent=true,distance=7]' 
     into ('minecraft:leaves', {'persistent': 'true', 'distance': '7'})
     """
     # Regex to capture "Name" and optional "[Properties]"
-    match = re.match(r'([^\[]+)(?:\[(.*)\])?', full_block_name)
+    match = re.match(r'([^\[]+)(?:\[(.*)\])?', full_name)
     if not match:
-        return full_block_name, {}
+        return full_name, {}
 
     base_name = match.group(1)
     properties_string = match.group(2)
@@ -149,7 +149,7 @@ class Section:
         palette_nbt_list = []
         
         for raw_name in self.block_palette:
-            base_name, properties = parse_block_string(raw_name)
+            base_name, properties = parse_nbt_string(raw_name)
             
             # Create the NBT Compound for this palette entry
             block_tag = {'Name': String(base_name)}
@@ -250,6 +250,43 @@ class Chunk:
             })
         })
 
+class EntityChunk:
+    def __init__(self, x, z):
+        self.x = x
+        self.z = z
+        self.entities = []
+
+    def add_entity(self, x, y, z, type_name, nbt_data=None):
+        # Default Entity NBT structure
+        entity = {
+            'id': String(type_name),
+            'Pos': List[Double]([Double(x), Double(y), Double(z)]),
+            'Motion': List[Double]([Double(0), Double(0), Double(0)]),
+            'Rotation': List[Float]([Float(0), Float(0)]),
+            'FallDistance': Float(0.0),
+            'Fire': Short(0),
+            'Air': Short(300),
+            'OnGround': Byte(1),
+            'Invulnerable': Byte(0),
+            'PortalCooldown': Int(0),
+            # Generate a random UUID
+            'UUID': IntArray([random.randint(-2147483648, 2147483647) for _ in range(4)])
+        }
+        
+        # Merge extra NBT (like PersistenceRequired) if provided
+        if nbt_data:
+            entity.update(nbt_data)
+            
+        self.entities.append(Compound(entity))
+
+    def to_nbt(self):
+        # 1.20+ Entity Chunk Format
+        return Compound({
+            'Position': IntArray([self.x, self.z]),
+            'DataVersion': Int(3465), 
+            'Entities': List[Compound](self.entities)
+        })
+
 class Region:
     def __init__(self, r_x, r_z):
         self.r_x = r_x
@@ -304,6 +341,7 @@ class Region:
 class MinecraftWorldSimple:
     def __init__(self, world_name="Generated World"):
         self.regions = {} 
+        self.entity_regions = {} # <--- NEW: Store entity regions separately
         self.world_name = world_name
         self.spawn_coords = (0, 60, 0)
         self.difficulty = MINECRAFT_DIFFICULTY_NORMAL
@@ -391,6 +429,33 @@ class MinecraftWorldSimple:
                     biome_name
                 )
 
+    def add_mob(self, x, y, z, mob_name, persistent=True, nbt_data=None):
+        """
+        Adds a mob at the specific coordinate.
+        persistent: If True, mob won't despawn when you fly away.
+        """
+        cx, cz = int(x) // 16, int(z) // 16
+        rx, rz = cx // 32, cz // 32
+        
+        # Initialize Entity Region if needed
+        if (rx, rz) not in self.entity_regions: 
+            self.entity_regions[(rx, rz)] = Region(rx, rz)
+        
+        # Re-use the Region class, but force it to use EntityChunk instead of Chunk
+        region = self.entity_regions[(rx, rz)]
+        if (cx, cz) not in region.chunks:
+            region.chunks[(cx, cz)] = EntityChunk(cx, cz)
+            
+        chunk = region.chunks[(cx, cz)]
+        
+        if nbt_data is not None:
+            extra_nbt = nbt_data
+
+        if persistent:
+            extra_nbt['PersistenceRequired'] = Byte(1)
+
+        chunk.add_entity(x + 0.5, y, z + 0.5, mob_name, extra_nbt)
+
     def export(self, folder_path, overwrite=False):
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
@@ -400,6 +465,7 @@ class MinecraftWorldSimple:
             else:
                 raise RuntimeError('Output directory already exists. Delete it or set overwrite=True')
         
+        # 1. Export Block Regions
         region_folder = os.path.join(folder_path, 'region')
         if not os.path.exists(region_folder): os.makedirs(region_folder)
 
@@ -408,8 +474,17 @@ class MinecraftWorldSimple:
         level_dat.save(os.path.join(folder_path, "level.dat"), gzipped=True)
 
         for (rx, rz), region in self.regions.items():
-            print(f"Exporting Region {rx}.{rz}...")
+            print(f"Exporting Block Region {rx}.{rz}...")
             region.save(os.path.join(region_folder, f"r.{rx}.{rz}.mca"))
+
+        # 2. Export Entity Regions (NEW)
+        entity_folder = os.path.join(folder_path, 'entities')
+        if not os.path.exists(entity_folder): os.makedirs(entity_folder)
+        
+        for (rx, rz), region in self.entity_regions.items():
+            print(f"Exporting Entity Region {rx}.{rz}...")
+            # We reuse the same Region.save logic, it works for entities too!
+            region.save(os.path.join(entity_folder, f"r.{rx}.{rz}.mca"))
         
         print("Done!")
 

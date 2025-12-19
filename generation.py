@@ -3,6 +3,7 @@ import math
 from dataclasses import dataclass
 from noise import pnoise2, snoise3
 from minecraft import MinecraftWorld, CustomBiome, IntColor
+from nbtlib import Compound, Int, List, Float, String
 
 # --- Configuration ---
 NUM_ISLANDS = 1000 # maximum. less will actually generate
@@ -65,6 +66,24 @@ BIOME_ORES = {
         'minecraft:lapis_ore': 5,
         'minecraft:diamond_ore': 2
     }
+}
+
+# --- Mob Configuration ---
+BIOME_MOBS = {
+    'minecraft:plains':       ['minecraft:pig', 'minecraft:sheep', 'minecraft:cow', 'minecraft:horse', 'minecraft:chicken'],
+    'minecraft:forest':       ['minecraft:pig', 'minecraft:sheep', 'minecraft:cow', 'minecraft:chicken'],
+    'minecraft:birch_forest': ['minecraft:pig', 'minecraft:sheep', 'minecraft:cow', 'minecraft:chicken'],
+    'minecraft:dark_forest':  ['minecraft:pig', 'minecraft:wolf', 'minecraft:cow', 'minecraft:mooshroom'], # Magical feel
+    'minecraft:cherry_grove': ['minecraft:sheep'],
+    'minecraft:swamp':        ['minecraft:pig'],
+    'minecraft:jungle':       ['minecraft:panda', 'minecraft:parrot', 'minecraft:ocelot', 'minecraft:cow'],
+    'minecraft:taiga':        ['minecraft:wolf', 'minecraft:fox', 'minecraft:rabbit', 'minecraft:cow', 'minecraft:pig'],
+    'minecraft:snowy_plains': ['minecraft:cow', 'minecraft:rabbit', 'minecraft:sheep'],
+    'minecraft:ice_spikes':   ['minecraft:polar_bear', 'minecraft:snow_golem', 'minecraft:sheep'],
+    'minecraft:desert':       ['minecraft:husk', 'minecraft:rabbit', 'minecraft:camel'],
+    'minecraft:savanna':      ['minecraft:llama', 'minecraft:horse', 'minecraft:cow', 'minecraft:pig'],
+    'minecraft:badlands':     ['minecraft:spider', 'minecraft:husk'], # Hostiles fit the harsh terrain
+    'volcanic_biome':         ['minecraft:wither_skeleton']
 }
 
 # --- Flower Configuration ---
@@ -471,12 +490,17 @@ def generate_island_layout(biome_liquid_map, spawn_r_override=None):
             
     return islands_layout
 
-def generate_islands(mc_world, island_layout_list):
+def generate_islands(mc_world: MinecraftWorld, island_layout_list):
     spawn_y = ISLAND_Y_LEVEL 
-    print(f"Generating blocks for {len(island_layout_list)} islands...")
+    print(f"Generating blocks and mobs for {len(island_layout_list)} islands...")
 
     for i, island in enumerate(island_layout_list):
         print(f"  - Island {i+1} ({island.biome})")
+        
+        # Get mob list for this biome, or default to generic animals
+        island_mobs = BIOME_MOBS.get(island.biome, ['minecraft:sheep', 'minecraft:pig'])
+        if 'volcanic' in island.biome:
+             island_mobs = BIOME_MOBS['volcanic_biome']
 
         # 1. Biome Strips
         for z in range(island.z - island.radius, island.z + island.radius + 1):
@@ -523,7 +547,6 @@ def generate_islands(mc_world, island_layout_list):
                     else: block_type = 'minecraft:deepslate'
 
                     # --- BIOME BLOCK SWAPS ---
-                    
                     if island.biome == 'minecraft:desert':
                         if block_type == 'minecraft:grass_block': block_type = 'minecraft:sand'
                         elif block_type == 'minecraft:dirt': block_type = 'minecraft:sandstone'
@@ -532,13 +555,14 @@ def generate_islands(mc_world, island_layout_list):
                         elif block_type == 'minecraft:dirt': block_type = 'minecraft:red_sandstone'
                         elif block_type == 'minecraft:stone': block_type = 'minecraft:terracotta'
                     
-                    # --- NEW: ICE ISLAND LOGIC ---
+                    # Ice Island Swaps
                     elif island.biome == 'minecraft:ice_spikes':
                         if block_type == 'minecraft:deepslate': block_type = 'minecraft:blue_ice'
                         elif block_type == 'minecraft:stone': block_type = 'minecraft:packed_ice'
                         elif block_type == 'minecraft:dirt': block_type = 'minecraft:ice'
                         elif block_type == 'minecraft:grass_block': block_type = 'minecraft:snow_block'
                     
+                    # Volcanic Swaps
                     elif 'volcanic_biome' in island.biome:
                         if block_type in ['minecraft:grass_block', 'minecraft:dirt'] and random.random() < 0.25:
                             block_type = 'minecraft:gravel'
@@ -552,32 +576,87 @@ def generate_islands(mc_world, island_layout_list):
                             else:
                                 block_type = 'minecraft:magma_block'
  
-                    # --- ORE GENERATION ---
-                    # Only attempt ore placement in valid ground blocks
-                    if block_type in ['minecraft:stone', 'minecraft:deepslate']:
-                        block_type = determine_ore(island.biome, block_type)
-
                     mc_world.set_block((x, y, z), block_type)
 
-                # 3. Liquids & Surface Decoration
+                # 3. Liquids, Surface Decoration & MOBS
                 if top_y < island.water_level:
                     mc_world.fill_blocks((x, top_y + 1, z), (x, island.water_level, z), island.liquid_block)
                 
                 elif top_y >= island.water_level:
                     surface_block = mc_world.get_block((x, top_y, z))
                     
-                    # --- VEGETATION LOGIC ---
+                    # --- VEGETATION & MOBS ---
+                    
+                    # 1. MOB SPAWNING (Simulated Natural Spawning)
+                    # Chance is low to prevent overcrowding (e.g., 0.5% per surface block)
+                    if random.random() < 0.01:
+                        valid_spawn = False
+                        
+                        # Rules for spawning based on surface material
+                        if 'volcanic' in island.biome:
+                            # Volcanic mobs can spawn on anything solid
+                            if surface_block != 'minecraft:lava': valid_spawn = True
+                        elif 'ice_spikes' in island.biome:
+                             # Polar bears/strays on ice/snow
+                            if surface_block in ['minecraft:snow_block', 'minecraft:ice']: 
+                                valid_spawn = True
+                        else:
+                            # Standard animals need grass
+                            if surface_block == 'minecraft:grass_block': valid_spawn = True
+                            # Desert mobs need sand
+                            elif surface_block in ['minecraft:sand', 'minecraft:red_sand']: valid_spawn = True
+
+                        if valid_spawn:
+                            mob_name = random.choice(island_mobs)
+                            nbt_data = {}
+
+                            if mob_name == 'minecraft:horse':
+                                # It's a standard horse; Generate random visual variant
+                                # Colors: 0=White, 1=Creamy, 2=Chestnut, 3=Brown, 4=Black, 5=Gray, 6=Dark Brown
+                                color_id = random.randint(0, 6)
+                                
+                                # Markings: 0=None, 1=White, 2=WhiteField, 3=WhiteDots, 4=BlackDots
+                                # Logic: Marking ID is shifted by 8 bits (multiplied by 256)
+                                marking_id = random.randint(0, 4)
+                                
+                                variant_val = color_id + (marking_id * 256)
+                                
+                                speed = random.uniform(	0.1125, 0.3375 )
+
+                                jump = random.uniform(0.4, 1.0)
+
+                                health = random.randint(15, 30)
+
+                                nbt_data = Compound({
+                                    "Variant": Int(variant_val),
+                                    "Health": Int(health),
+                                    "Attributes": List[Compound]([
+                                        Compound({
+                                            "Name": String("generic.max_health"),
+                                            "Base": Int(health)
+                                        }),
+                                        Compound({
+                                            "Name": String("generic.movement_speed"),
+                                            "Base": Float(speed)
+                                        }),
+                                        Compound({
+                                            "Name": String("horse.jump_strength"),
+                                            "Base": Float(jump)
+                                        })
+                                    ])
+                                })
+
+                            mc_world.add_mob(x, top_y + 1, z, mob_name, persistent=True, nbt_data=nbt_data)
+
+                    # 2. VEGETATION LOGIC (Existing)
                     if 'volcanic_biome' in island.biome:
                         pass
                     
-                    # --- NEW: ICE ISLAND SURFACE (No plants, just variable snow) ---
                     elif island.biome == 'minecraft:ice_spikes':
-                        # Place variable snow layers on top of the solid snow block
                         if surface_block == 'minecraft:snow_block':
                             layers = random.randint(1, 8)
                             mc_world.set_block((x, top_y + 1, z), f"minecraft:snow[layers={layers}]")
 
-                    # B. Sugarcane
                     elif island.liquid_block == 'minecraft:water' and \
                          top_y == island.water_level and \
                          surface_block in ['minecraft:grass_block', 'minecraft:sand', 'minecraft:dirt', 'minecraft:red_sand']:
@@ -592,7 +671,6 @@ def generate_islands(mc_world, island_layout_list):
                          if is_next_to_water and random.random() < 0.05:
                              place_sugarcane(mc_world, x, top_y, z)
 
-                    # C. Trees, Cacti, Mushrooms, Flowers, Dead Bushes
                     else:
                         tree_chance = 0.005 
                         if 'forest' in island.biome: tree_chance = 0.02
@@ -611,20 +689,14 @@ def generate_islands(mc_world, island_layout_list):
                                         place_big_mushroom(mc_world, x, top_y + 1, z, m_type)
                                     else:
                                         place_tree(mc_world, x, top_y + 1, z, island.biome)
-                        
-                        # D. Ground Cover
                         else:
-                            # 1. DESERT & BADLANDS -> Dead Bush
                             if (island.biome == 'minecraft:desert' and surface_block == 'minecraft:sand') or \
                                (island.biome == 'minecraft:badlands' and surface_block == 'minecraft:red_sand'):
                                 if random.random() < 0.015: 
                                     mc_world.set_block((x, top_y + 1, z), 'minecraft:dead_bush')
                             
-                            # 2. GRASSY BIOMES
                             elif surface_block == 'minecraft:grass_block':
-                                
                                 placed_crop = False
-                                
                                 if 'taiga' in island.biome:
                                     if random.random() < 0.01:
                                         mc_world.set_block((x, top_y + 1, z), 'minecraft:pumpkin')
@@ -632,7 +704,6 @@ def generate_islands(mc_world, island_layout_list):
                                     elif random.random() < 0.04:
                                         mc_world.set_block((x, top_y + 1, z), 'minecraft:sweet_berry_bush[age=2]')
                                         placed_crop = True
-                                        
                                 elif 'jungle' in island.biome:
                                     if random.random() < 0.01:
                                         mc_world.set_block((x, top_y + 1, z), 'minecraft:melon')
@@ -673,7 +744,7 @@ def main():
 
     mc_world.set_spawn((0, spawn_y, 0))
     print("Exporting world...")
-    mc_world.export('floating_islands', overwrite=True)
+    mc_world.export('C:\\Users\\Marcin\\Desktop\\PrismLauncher-Windows-MSVC-Portable-8.3\\instances\\1.20.4\\.minecraft\\saves\\floating_islands', overwrite=True)
     print("Done!")
 
 if __name__ == "__main__":
