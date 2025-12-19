@@ -112,6 +112,9 @@ SCALE_BOTTOM = 0.15
 SCALE_CAVE = 0.06
 CAVE_THRESHOLD = 0.55
 
+# ore count
+global_ore_count = {}
+
 # --- Data Structures ---
 @dataclass
 class IslandData:
@@ -156,6 +159,8 @@ def determine_ore(biome_name, host_block):
     Decides if a block should become an ore based on biome weights.
     Returns the new block string, or the original host_block if no ore is generated.
     """
+    global global_ore_count
+
     # 1. Global Density Check
     if random.random() > ORE_DENSITY:
         return host_block
@@ -182,8 +187,13 @@ def determine_ore(biome_name, host_block):
             'minecraft:lapis_ore', 'minecraft:diamond_ore', 'minecraft:emerald_ore'
         ]
         if chosen_ore in has_deepslate_variant:
-            return chosen_ore.replace("minecraft:", "minecraft:deepslate_")
-            
+            chosen_ore = chosen_ore.replace("minecraft:", "minecraft:deepslate_")
+    
+    if chosen_ore not in global_ore_count:
+        global_ore_count[chosen_ore] = 0
+    
+    global_ore_count[chosen_ore] += 1
+
     return chosen_ore
 
 # --- Vegetation Logic ---
@@ -575,7 +585,12 @@ def generate_islands(mc_world: MinecraftWorld, island_layout_list):
                                 block_type = 'minecraft:lava'
                             else:
                                 block_type = 'minecraft:magma_block'
- 
+
+                    # --- ORE GENERATION ---
+                    # Only attempt ore placement in valid ground blocks
+                    if block_type in ['minecraft:stone', 'minecraft:deepslate']:
+                        block_type = determine_ore(island.biome, block_type)
+
                     mc_world.set_block((x, y, z), block_type)
 
                 # 3. Liquids, Surface Decoration & MOBS
@@ -746,6 +761,9 @@ def main():
     print("Exporting world...")
     mc_world.export('C:\\Users\\Marcin\\Desktop\\PrismLauncher-Windows-MSVC-Portable-8.3\\instances\\1.20.4\\.minecraft\\saves\\floating_islands', overwrite=True)
     print("Done!")
+    print("Ore statistics: ")
+    for k, v in sorted(global_ore_count.items()):
+        print("Generated " , v, " of ", k)
 
 if __name__ == "__main__":
     main()
