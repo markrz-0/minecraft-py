@@ -69,6 +69,7 @@ BIOME_ORES = {
 }
 
 # --- Mob Configuration ---
+DEFAULT_MOBS = ['minecraft:sheep', 'minecraft:pig']
 BIOME_MOBS = {
     'minecraft:plains':       ['minecraft:pig', 'minecraft:sheep', 'minecraft:cow', 'minecraft:horse', 'minecraft:chicken'],
     'minecraft:forest':       ['minecraft:pig', 'minecraft:sheep', 'minecraft:cow', 'minecraft:chicken'],
@@ -79,7 +80,7 @@ BIOME_MOBS = {
     'minecraft:jungle':       ['minecraft:panda', 'minecraft:parrot', 'minecraft:ocelot', 'minecraft:cow'],
     'minecraft:taiga':        ['minecraft:wolf', 'minecraft:fox', 'minecraft:rabbit', 'minecraft:cow', 'minecraft:pig'],
     'minecraft:snowy_plains': ['minecraft:cow', 'minecraft:rabbit', 'minecraft:sheep'],
-    'minecraft:ice_spikes':   ['minecraft:polar_bear', 'minecraft:snow_golem', 'minecraft:sheep'],
+    'minecraft:ice_spikes':   [],
     'minecraft:desert':       ['minecraft:husk', 'minecraft:rabbit', 'minecraft:camel'],
     'minecraft:savanna':      ['minecraft:llama', 'minecraft:horse', 'minecraft:cow', 'minecraft:pig'],
     'minecraft:badlands':     ['minecraft:spider', 'minecraft:husk'], # Hostiles fit the harsh terrain
@@ -87,6 +88,7 @@ BIOME_MOBS = {
 }
 
 # --- Flower Configuration ---
+DEFAULT_FLOWERS = ['minecraft:dandelion', 'minecraft:poppy']
 BIOME_FLOWERS = {
     'swamp': ['minecraft:blue_orchid'],
     'plains': [
@@ -103,7 +105,6 @@ BIOME_FLOWERS = {
     'snowy': ['minecraft:dandelion', 'minecraft:poppy']
 }
 
-DEFAULT_FLOWERS = ['minecraft:dandelion', 'minecraft:poppy']
 
 # --- Noise Settings ---
 SEED = 12345
@@ -508,7 +509,7 @@ def generate_islands(mc_world: MinecraftWorld, island_layout_list):
         print(f"  - Island {i+1} ({island.biome})")
         
         # Get mob list for this biome, or default to generic animals
-        island_mobs = BIOME_MOBS.get(island.biome, ['minecraft:sheep', 'minecraft:pig'])
+        island_mobs = BIOME_MOBS.get(island.biome, DEFAULT_MOBS)
         if 'volcanic' in island.biome:
              island_mobs = BIOME_MOBS['volcanic_biome']
 
@@ -604,7 +605,7 @@ def generate_islands(mc_world: MinecraftWorld, island_layout_list):
                     
                     # 1. MOB SPAWNING (Simulated Natural Spawning)
                     # Chance is low to prevent overcrowding (e.g., 0.5% per surface block)
-                    if random.random() < 0.01:
+                    if random.random() < 0.01 and len(island_mobs) > 0:
                         valid_spawn = False
                         
                         # Rules for spawning based on surface material
