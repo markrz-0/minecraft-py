@@ -6,12 +6,12 @@ from minecraft import MinecraftWorld, CustomBiome, IntColor
 from nbtlib import Compound, Int, List, Float, String
 
 # --- Configuration ---
-NUM_ISLANDS = 1000 # maximum. less will actually generate
+NUM_ISLANDS = 500 # maximum. less will actually generate
 ISLAND_RADIUS_MIN = 16
 ISLAND_RADIUS_MAX = 32
 SPAWN_ISLAND_RADIUS = 24 # always forest biome
 ISLAND_Y_LEVEL = 60
-ISLAND_SPREAD = 300 # playable area - square with sides with length 2 * ISLAND_SPREAD and center ant (0,0)
+ISLAND_SPREAD = 400 # playable area - square with sides with length 2 * ISLAND_SPREAD and center ant (0,0)
 
 # Standard biomes (+ one custom volcanic [source of lava] added later [using datapacks])
 STANDARD_BIOMES = [
