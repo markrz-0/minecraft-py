@@ -235,7 +235,7 @@ def place_tree(mc_world, x, y, z, biome_name):
         leaves = 'minecraft:oak_leaves'
         shape = 'standard' 
 
-    leaves = f"{leaves}[persistent=true]"
+    leaves = f"{leaves}[distance=1]"
 
     # --- 3a. Vine Helper ---
     def try_spawn_vine_column(src_x, src_y, src_z):
@@ -501,6 +501,213 @@ def generate_island_layout(biome_liquid_map, spawn_r_override=None):
             
     return islands_layout
 
+# --- Refactored Helper Functions ---
+
+def apply_biome_strips(mc_world: MinecraftWorld, island: IslandData):
+    """Fills the biome data for the island chunk column."""
+    for z in range(island.z - island.radius, island.z + island.radius + 1):
+        dz = z - island.z
+        if abs(dz) <= island.radius:
+            width_half = int(math.sqrt(island.radius**2 - dz**2))
+            mc_world.fill_biomes(
+                (island.x - width_half, -64, z), 
+                (island.x + width_half, 320, z), 
+                island.biome
+            )
+
+def calculate_bottom_y(x, z, top_y, island: IslandData):
+    """Calculates the bottom Y coordinate of the island based on noise and radius."""
+    dist = math.sqrt((x - island.x)**2 + (z - island.z)**2)
+    norm_dist = dist / island.radius
+    current_depth = math.sqrt(max(0, 1.0 - norm_dist**2)) * 35
+    ragged_noise = get_height_map(x, z, SEED + 100, SCALE_BOTTOM) * 8
+    return int(top_y - current_depth + ragged_noise)
+
+def resolve_block_type(depth, y, top_y, bottom_y, dist, island: IslandData):
+    """
+    Determines the base block type (Stone, Dirt, Deepslate, or Biome Variant) 
+    based on depth and biome rules.
+    """
+    # 1. Standard Gradient
+    block_type = 'minecraft:stone' 
+    if depth == 0:
+        if y < island.water_level: block_type = 'minecraft:dirt' 
+        else: block_type = 'minecraft:grass_block'
+    elif depth < 5: block_type = 'minecraft:dirt'
+    elif depth < 15: block_type = 'minecraft:stone'
+    else: block_type = 'minecraft:deepslate'
+
+    # 2. Biome Specific Swaps
+    if island.biome == 'minecraft:desert':
+        if block_type == 'minecraft:grass_block': block_type = 'minecraft:sand'
+        elif block_type == 'minecraft:dirt': block_type = 'minecraft:sandstone'
+    
+    elif island.biome == 'minecraft:badlands':
+        if block_type == 'minecraft:grass_block': block_type = 'minecraft:red_sand'
+        elif block_type == 'minecraft:dirt': block_type = 'minecraft:red_sandstone'
+        elif block_type == 'minecraft:stone': block_type = 'minecraft:terracotta'
+    
+    elif island.biome == 'minecraft:ice_spikes':
+        if block_type == 'minecraft:deepslate': block_type = 'minecraft:blue_ice'
+        elif block_type == 'minecraft:stone': block_type = 'minecraft:packed_ice'
+        elif block_type == 'minecraft:dirt': block_type = 'minecraft:ice'
+        elif block_type == 'minecraft:grass_block': block_type = 'minecraft:snow_block'
+    
+    elif 'volcanic_biome' in island.biome:
+        if block_type in ['minecraft:grass_block', 'minecraft:dirt'] and random.random() < 0.25:
+            block_type = 'minecraft:gravel'
+        elif block_type == 'minecraft:deepslate' and random.random() < 0.15:
+            block_type = 'minecraft:obsidian'
+        elif block_type in ['minecraft:stone', 'minecraft:deepslate'] and random.random() < 0.15:
+            is_horizontal_safe = dist < (0.8 * island.radius)
+            is_vertical_safe = (y < top_y - 3) and (y > bottom_y + 3)
+            if is_horizontal_safe and is_vertical_safe:
+                block_type = 'minecraft:lava'
+            else:
+                block_type = 'minecraft:magma_block'
+
+    return block_type
+
+def generate_terrain_column(mc_world, x, z, top_y, bottom_y, dist, island: IslandData):
+    """Generates the vertical stack of blocks for the island terrain."""
+    for y in range(bottom_y, top_y + 1):
+        # Cave Check
+        cave_noise = get_cave_density(x, y, z, SEED + 200, SCALE_CAVE)
+        if cave_noise > CAVE_THRESHOLD and y <= island.water_level - 3 and 'volcanic_biome' not in island.biome:
+            continue 
+
+        depth = top_y - y
+        block_type = resolve_block_type(depth, y, top_y, bottom_y, dist, island)
+
+        # Ore Check (Only in valid ground)
+        if block_type in ['minecraft:stone', 'minecraft:deepslate']:
+            block_type = determine_ore(island.biome, block_type)
+
+        mc_world.set_block((x, y, z), block_type)
+
+def get_horse_nbt():
+    """Generates complex NBT data for horses."""
+    color_id = random.randint(0, 6)
+    marking_id = random.randint(0, 4)
+    variant_val = color_id + (marking_id * 256)
+    speed = random.uniform(0.1125, 0.3375)
+    jump = random.uniform(0.4, 1.0)
+    health = random.randint(15, 30)
+
+    return Compound({
+        "Variant": Int(variant_val),
+        "Health": Int(health),
+        "Attributes": List[Compound]([
+            Compound({"Name": String("generic.max_health"), "Base": Int(health)}),
+            Compound({"Name": String("generic.movement_speed"), "Base": Float(speed)}),
+            Compound({"Name": String("horse.jump_strength"), "Base": Float(jump)})
+        ])
+    })
+
+def try_spawn_mob(mc_world, x, y, z, island: IslandData, surface_block):
+    """Attempts to spawn a mob based on biome and surface material."""
+    island_mobs = BIOME_MOBS.get(island.biome, DEFAULT_MOBS)
+    if 'volcanic' in island.biome:
+        island_mobs = BIOME_MOBS['volcanic_biome']
+    
+    if not island_mobs or random.random() >= 0.01:
+        return
+
+    valid_spawn = False
+    if 'volcanic' in island.biome:
+        if surface_block != 'minecraft:lava': valid_spawn = True
+    elif 'ice_spikes' in island.biome:
+        if surface_block in ['minecraft:snow_block', 'minecraft:ice']: valid_spawn = True
+    else:
+        if surface_block == 'minecraft:grass_block': valid_spawn = True
+        elif surface_block in ['minecraft:sand', 'minecraft:red_sand']: valid_spawn = True
+
+    if valid_spawn:
+        mob_name = random.choice(island_mobs)
+        nbt_data = {}
+        if mob_name == 'minecraft:horse':
+            nbt_data = get_horse_nbt()
+
+        mc_world.add_mob(x, y, z, mob_name, persistent=True, nbt_data=nbt_data)
+
+def place_vegetation(mc_world, x, y, z, island: IslandData, surface_block):
+    """Handles logic for trees, flowers, crops, and snow layers."""
+    # 1. Special Cases
+    if 'volcanic_biome' in island.biome:
+        return
+    
+    if island.biome == 'minecraft:ice_spikes' and surface_block == 'minecraft:snow_block':
+        layers = random.randint(1, 8)
+        mc_world.set_block((x, y, z), f"minecraft:snow[layers={layers}]")
+        return
+
+    # 2. Sugarcane check (Edge of water)
+    if island.liquid_block == 'minecraft:water' and (y-1) == island.water_level and \
+       surface_block in ['minecraft:grass_block', 'minecraft:sand', 'minecraft:dirt', 'minecraft:red_sand']:
+        
+        is_next_to_water = False
+        for dx, dz in [(1,0), (-1,0), (0,1), (0,-1)]:
+            # Note: We recalculate surface Y here for the neighbor check to ensure accuracy without passing full map data
+            neighbor_h = calculate_surface_y(x + dx, z + dz, island)
+            if neighbor_h < island.water_level:
+                is_next_to_water = True
+                break
+    
+        if is_next_to_water and random.random() < 0.05:
+            place_sugarcane(mc_world, x, y-1, z)
+            return
+
+    # 3. Trees and Cacti
+    tree_chance = 0.005 
+    if 'forest' in island.biome: tree_chance = 0.02
+    elif 'jungle' in island.biome: tree_chance = 0.05
+    elif 'desert' in island.biome or 'badlands' in island.biome: tree_chance = 0.01 
+    
+    if random.random() < tree_chance:
+        if island.biome in ['minecraft:desert', 'minecraft:badlands']:
+            if surface_block in ['minecraft:sand', 'minecraft:red_sand']:
+                place_cactus(mc_world, x, y-1, z)
+        elif surface_block == 'minecraft:grass_block':
+            if 'dark_forest' in island.biome and random.random() < 0.25:
+                place_big_mushroom(mc_world, x, y, z, random.choice(['red', 'brown']))
+            else:
+                place_tree(mc_world, x, y, z, island.biome)
+        return
+
+    # 4. Ground Cover (Flowers, Grass, Dead Bush, Crops)
+    if (island.biome == 'minecraft:desert' and surface_block == 'minecraft:sand') or \
+        (island.biome == 'minecraft:badlands' and surface_block == 'minecraft:red_sand'):
+        if random.random() < 0.015: 
+            mc_world.set_block((x, y, z), 'minecraft:dead_bush')
+    
+    elif surface_block == 'minecraft:grass_block':
+        placed_crop = False
+        if 'taiga' in island.biome:
+            if random.random() < 0.01:
+                mc_world.set_block((x, y, z), 'minecraft:pumpkin')
+                placed_crop = True
+            elif random.random() < 0.04:
+                mc_world.set_block((x, y, z), 'minecraft:sweet_berry_bush[age=2]')
+                placed_crop = True
+        elif 'jungle' in island.biome:
+            if random.random() < 0.01:
+                mc_world.set_block((x, y, z), 'minecraft:melon')
+                placed_crop = True
+                
+        if not placed_crop and random.random() < 0.05: 
+            if random.random() < 0.10:
+                flower_type = get_random_flower(island.biome)
+                if flower_type in ['minecraft:rose_bush', 'minecraft:lilac', 'minecraft:peony']:
+                    mc_world.set_block((x, y, z), flower_type + '[half=lower]')
+                    mc_world.set_block((x, y + 1, z), flower_type + '[half=upper]')
+                else:
+                    mc_world.set_block((x, y, z), flower_type)
+            else:
+                vegetation_type = 'minecraft:fern' if 'taiga' in island.biome else 'minecraft:grass'
+                mc_world.set_block((x, y, z), vegetation_type)
+
+# --- Main Generation Function ---
+
 def generate_islands(mc_world: MinecraftWorld, island_layout_list):
     spawn_y = ISLAND_Y_LEVEL 
     print(f"Generating blocks and mobs for {len(island_layout_list)} islands...")
@@ -508,237 +715,36 @@ def generate_islands(mc_world: MinecraftWorld, island_layout_list):
     for i, island in enumerate(island_layout_list):
         print(f"  - Island {i+1} ({island.biome})")
         
-        # Get mob list for this biome, or default to generic animals
-        island_mobs = BIOME_MOBS.get(island.biome, DEFAULT_MOBS)
-        if 'volcanic' in island.biome:
-             island_mobs = BIOME_MOBS['volcanic_biome']
+        # 1. Apply Biome Strips
+        apply_biome_strips(mc_world, island)
 
-        # 1. Biome Strips
-        for z in range(island.z - island.radius, island.z + island.radius + 1):
-            dz = z - island.z
-            if abs(dz) <= island.radius:
-                width_half = int(math.sqrt(island.radius**2 - dz**2))
-                mc_world.fill_biomes(
-                    (island.x - width_half, -64, z), 
-                    (island.x + width_half, 320, z), 
-                    island.biome
-                )
-
-        # 2. Block Placement
+        # 2. Iterate Coordinate Grid
         for x in range(island.x - island.radius, island.x + island.radius + 1):
             for z in range(island.z - island.radius, island.z + island.radius + 1):
                 
                 dist = math.sqrt((x - island.x)**2 + (z - island.z)**2)
                 if dist > island.radius: continue
 
-                # Height Calc
+                # Calculate Heights
                 top_y = calculate_surface_y(x, z, island)
-
-                norm_dist = dist / island.radius
-                current_depth = math.sqrt(max(0, 1.0 - norm_dist**2)) * 35
-                ragged_noise = get_height_map(x, z, SEED + 100, SCALE_BOTTOM) * 8
-                bottom_y = int(top_y - current_depth + ragged_noise)
+                bottom_y = calculate_bottom_y(x, z, top_y, island)
                 
                 if bottom_y >= top_y: continue
 
-                # Place Column
-                for y in range(bottom_y, top_y + 1):
-                    cave_noise = get_cave_density(x, y, z, SEED + 200, SCALE_CAVE)
-                    if cave_noise > CAVE_THRESHOLD and y <= island.water_level - 3 and 'volcanic_biome' not in island.biome:
-                        continue 
+                # 3. Generate Terrain Column
+                generate_terrain_column(mc_world, x, z, top_y, bottom_y, dist, island)
 
-                    depth = top_y - y
-                    block_type = 'minecraft:stone' 
-
-                    if depth == 0:
-                        if y < island.water_level: block_type = 'minecraft:dirt' 
-                        else: block_type = 'minecraft:grass_block'
-                    elif depth < 5: block_type = 'minecraft:dirt'
-                    elif depth < 15: block_type = 'minecraft:stone'
-                    else: block_type = 'minecraft:deepslate'
-
-                    # --- BIOME BLOCK SWAPS ---
-                    if island.biome == 'minecraft:desert':
-                        if block_type == 'minecraft:grass_block': block_type = 'minecraft:sand'
-                        elif block_type == 'minecraft:dirt': block_type = 'minecraft:sandstone'
-                    elif island.biome == 'minecraft:badlands':
-                        if block_type == 'minecraft:grass_block': block_type = 'minecraft:red_sand'
-                        elif block_type == 'minecraft:dirt': block_type = 'minecraft:red_sandstone'
-                        elif block_type == 'minecraft:stone': block_type = 'minecraft:terracotta'
-                    
-                    # Ice Island Swaps
-                    elif island.biome == 'minecraft:ice_spikes':
-                        if block_type == 'minecraft:deepslate': block_type = 'minecraft:blue_ice'
-                        elif block_type == 'minecraft:stone': block_type = 'minecraft:packed_ice'
-                        elif block_type == 'minecraft:dirt': block_type = 'minecraft:ice'
-                        elif block_type == 'minecraft:grass_block': block_type = 'minecraft:snow_block'
-                    
-                    # Volcanic Swaps
-                    elif 'volcanic_biome' in island.biome:
-                        if block_type in ['minecraft:grass_block', 'minecraft:dirt'] and random.random() < 0.25:
-                            block_type = 'minecraft:gravel'
-                        elif block_type == 'minecraft:deepslate' and random.random() < 0.15:
-                            block_type = 'minecraft:obsidian'
-                        elif block_type in ['minecraft:stone', 'minecraft:deepslate'] and random.random() < 0.15:
-                            is_horizontal_safe = dist < (0.8 * island.radius)
-                            is_vertical_safe = (y < top_y - 3) and (y > bottom_y + 3)
-                            if is_horizontal_safe and is_vertical_safe:
-                                block_type = 'minecraft:lava'
-                            else:
-                                block_type = 'minecraft:magma_block'
-
-                    # --- ORE GENERATION ---
-                    # Only attempt ore placement in valid ground blocks
-                    if block_type in ['minecraft:stone', 'minecraft:deepslate']:
-                        block_type = determine_ore(island.biome, block_type)
-
-                    mc_world.set_block((x, y, z), block_type)
-
-                # 3. Liquids, Surface Decoration & MOBS
+                # 4. Liquids, Surface Decoration & Mobs
                 if top_y < island.water_level:
                     mc_world.fill_blocks((x, top_y + 1, z), (x, island.water_level, z), island.liquid_block)
                 
                 elif top_y >= island.water_level:
                     surface_block = mc_world.get_block((x, top_y, z))
-                    
-                    # --- VEGETATION & MOBS ---
-                    
-                    # 1. MOB SPAWNING (Simulated Natural Spawning)
-                    # Chance is low to prevent overcrowding (e.g., 0.5% per surface block)
-                    if random.random() < 0.01 and len(island_mobs) > 0:
-                        valid_spawn = False
-                        
-                        # Rules for spawning based on surface material
-                        if 'volcanic' in island.biome:
-                            # Volcanic mobs can spawn on anything solid
-                            if surface_block != 'minecraft:lava': valid_spawn = True
-                        elif 'ice_spikes' in island.biome:
-                             # Polar bears/strays on ice/snow
-                            if surface_block in ['minecraft:snow_block', 'minecraft:ice']: 
-                                valid_spawn = True
-                        else:
-                            # Standard animals need grass
-                            if surface_block == 'minecraft:grass_block': valid_spawn = True
-                            # Desert mobs need sand
-                            elif surface_block in ['minecraft:sand', 'minecraft:red_sand']: valid_spawn = True
+                    # Pass the coordinate ABOVE the surface block for spawning
+                    try_spawn_mob(mc_world, x, top_y + 1, z, island, surface_block)
+                    place_vegetation(mc_world, x, top_y + 1, z, island, surface_block)
 
-                        if valid_spawn:
-                            mob_name = random.choice(island_mobs)
-                            nbt_data = {}
-
-                            if mob_name == 'minecraft:horse':
-                                # It's a standard horse; Generate random visual variant
-                                # Colors: 0=White, 1=Creamy, 2=Chestnut, 3=Brown, 4=Black, 5=Gray, 6=Dark Brown
-                                color_id = random.randint(0, 6)
-                                
-                                # Markings: 0=None, 1=White, 2=WhiteField, 3=WhiteDots, 4=BlackDots
-                                # Logic: Marking ID is shifted by 8 bits (multiplied by 256)
-                                marking_id = random.randint(0, 4)
-                                
-                                variant_val = color_id + (marking_id * 256)
-                                
-                                speed = random.uniform(	0.1125, 0.3375 )
-
-                                jump = random.uniform(0.4, 1.0)
-
-                                health = random.randint(15, 30)
-
-                                nbt_data = Compound({
-                                    "Variant": Int(variant_val),
-                                    "Health": Int(health),
-                                    "Attributes": List[Compound]([
-                                        Compound({
-                                            "Name": String("generic.max_health"),
-                                            "Base": Int(health)
-                                        }),
-                                        Compound({
-                                            "Name": String("generic.movement_speed"),
-                                            "Base": Float(speed)
-                                        }),
-                                        Compound({
-                                            "Name": String("horse.jump_strength"),
-                                            "Base": Float(jump)
-                                        })
-                                    ])
-                                })
-
-                            mc_world.add_mob(x, top_y + 1, z, mob_name, persistent=True, nbt_data=nbt_data)
-
-                    # 2. VEGETATION LOGIC (Existing)
-                    if 'volcanic_biome' in island.biome:
-                        pass
-                    
-                    elif island.biome == 'minecraft:ice_spikes':
-                        if surface_block == 'minecraft:snow_block':
-                            layers = random.randint(1, 8)
-                            mc_world.set_block((x, top_y + 1, z), f"minecraft:snow[layers={layers}]")
-
-                    elif island.liquid_block == 'minecraft:water' and \
-                         top_y == island.water_level and \
-                         surface_block in ['minecraft:grass_block', 'minecraft:sand', 'minecraft:dirt', 'minecraft:red_sand']:
-                         
-                         is_next_to_water = False
-                         for dx, dz in [(1,0), (-1,0), (0,1), (0,-1)]:
-                             neighbor_h = calculate_surface_y(x + dx, z + dz, island)
-                             if neighbor_h < island.water_level:
-                                 is_next_to_water = True
-                                 break
-                        
-                         if is_next_to_water and random.random() < 0.05:
-                             place_sugarcane(mc_world, x, top_y, z)
-
-                    else:
-                        tree_chance = 0.005 
-                        if 'forest' in island.biome: tree_chance = 0.02
-                        elif 'jungle' in island.biome: tree_chance = 0.05
-                        elif 'desert' in island.biome or 'badlands' in island.biome: 
-                            tree_chance = 0.01 
-                        
-                        if random.random() < tree_chance:
-                            if island.biome == 'minecraft:desert' or island.biome == 'minecraft:badlands':
-                                if surface_block in ['minecraft:sand', 'minecraft:red_sand']:
-                                    place_cactus(mc_world, x, top_y, z)
-                            else:
-                                if surface_block == 'minecraft:grass_block':
-                                    if 'dark_forest' in island.biome and random.random() < 0.25:
-                                        m_type = random.choice(['red', 'brown'])
-                                        place_big_mushroom(mc_world, x, top_y + 1, z, m_type)
-                                    else:
-                                        place_tree(mc_world, x, top_y + 1, z, island.biome)
-                        else:
-                            if (island.biome == 'minecraft:desert' and surface_block == 'minecraft:sand') or \
-                               (island.biome == 'minecraft:badlands' and surface_block == 'minecraft:red_sand'):
-                                if random.random() < 0.015: 
-                                    mc_world.set_block((x, top_y + 1, z), 'minecraft:dead_bush')
-                            
-                            elif surface_block == 'minecraft:grass_block':
-                                placed_crop = False
-                                if 'taiga' in island.biome:
-                                    if random.random() < 0.01:
-                                        mc_world.set_block((x, top_y + 1, z), 'minecraft:pumpkin')
-                                        placed_crop = True
-                                    elif random.random() < 0.04:
-                                        mc_world.set_block((x, top_y + 1, z), 'minecraft:sweet_berry_bush[age=2]')
-                                        placed_crop = True
-                                elif 'jungle' in island.biome:
-                                    if random.random() < 0.01:
-                                        mc_world.set_block((x, top_y + 1, z), 'minecraft:melon')
-                                        placed_crop = True
-                                        
-                                if not placed_crop and random.random() < 0.05: 
-                                    if random.random() < 0.10:
-                                        flower_type = get_random_flower(island.biome)
-                                        if flower_type in ['minecraft:rose_bush', 'minecraft:lilac', 'minecraft:peony']:
-                                            mc_world.set_block((x, top_y + 1, z), flower_type + '[half=lower]')
-                                            mc_world.set_block((x, top_y + 2, z), flower_type + '[half=upper]')
-                                        else:
-                                            mc_world.set_block((x, top_y + 1, z), flower_type)
-                                    else:
-                                        vegetation_type = 'minecraft:grass'
-                                        if 'taiga' in island.biome:
-                                            vegetation_type = 'minecraft:fern'
-                                        mc_world.set_block((x, top_y + 1, z), vegetation_type)
-
+                # Capture spawn point
                 if x == 0 and z == 0:
                     spawn_y = max(top_y, island.water_level) + 2
                     
